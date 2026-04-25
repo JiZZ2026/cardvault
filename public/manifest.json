@@ -1,0 +1,12 @@
+{
+  "name": "Card Vault",
+  "short_name": "CardVault",
+  "description": "球星卡收藏数据库",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#080810",
+  "theme_color": "#C9A84C",
+  "icons": [
+    { "src": "/icon.png", "sizes": "192x192", "type": "image/png" }
+  ]
+}
