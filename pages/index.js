@@ -126,6 +126,24 @@ const apiMarketPrice = async (card) => {
   return d;
 };
 
+
+const apiCardStory = async (card) => {
+  const r = await fetch("/api/card-story", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      backImage: card.back_image,
+      player: card.player,
+      year: card.year,
+      series: card.series,
+      cardNumber: card.card_number,
+    }),
+  });
+  const d = await r.json();
+  if (!r.ok) return { success: false, error: d.error };
+  return d;
+};
+
 // Context
 const Ctx = createContext(null);
 const useApp = () => useContext(Ctx);
@@ -459,6 +477,82 @@ function EditScreen() {
   </div>;
 }
 
+// ─── Daily Card with Story ────────────────────────────────
+function DailyCardFull({ card, players }) {
+  const { nav } = useApp();
+  const [story, setStory] = useState(null);
+  const [loadingStory, setLoadingStory] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  const loadStory = async () => {
+    if (story) { setExpanded(e=>!e); return; }
+    setExpanded(true);
+    setLoadingStory(true);
+    const r = await apiCardStory(card);
+    if (r.success) setStory(r.story);
+    else setStory("暂时无法加载故事，请稍后重试。");
+    setLoadingStory(false);
+  };
+
+  return (
+    <div style={{ borderRadius:20, overflow:"hidden", background:T.surface, border:`1px solid ${T.borderGold}`, boxShadow:`0 12px 40px rgba(0,0,0,0.4)`, position:"relative" }}>
+      <div style={{ position:"absolute", inset:0, pointerEvents:"none", background:`radial-gradient(ellipse at 30% 50%,rgba(201,168,76,0.04) 0%,transparent 70%)` }} />
+      {/* Card content */}
+      <div style={{ display:"flex", gap:18, padding:"20px 20px 16px", cursor:"pointer" }} onClick={()=>nav("detail", card)}>
+        <div style={{ position:"relative", flexShrink:0 }}>
+          <div style={{ width:100, height:140, borderRadius:10, background:card.front_image?"#0a0a14":cGrad(card.player,players), display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", border:"1px solid rgba(255,255,255,0.12)", boxShadow:"0 8px 32px rgba(0,0,0,0.5)", animation:"cardFloat 5s ease-in-out infinite", overflow:"hidden" }}>
+            {card.front_image
+              ? <img src={card.front_image} alt="" style={{ width:"100%", height:"100%", objectFit:"contain" }} />
+              : <><div style={{ fontSize:40 }}>{pEmoji(card.player,players)}</div><div style={{ fontFamily:"'Space Mono',monospace", fontSize:9, color:"rgba(255,255,255,0.6)", marginTop:4 }}>{card.card_number}</div>{card.numbered&&<div style={{ fontFamily:"'Space Mono',monospace", fontSize:12, color:T.goldLight, fontWeight:700 }}>{card.numbered}</div>}</>}
+          </div>
+          {card.is_one_of_one&&<div style={{ position:"absolute", bottom:-6, left:"50%", transform:"translateX(-50%)", padding:"3px 8px", borderRadius:4, background:T.gold, color:"#000", fontFamily:"'Space Mono',monospace", fontSize:8, fontWeight:700, whiteSpace:"nowrap" }}>1 OF 1</div>}
+        </div>
+        <div style={{ flex:1, display:"flex", flexDirection:"column", justifyContent:"space-between" }}>
+          <div>
+            <div style={{ fontFamily:"'Space Mono',monospace", fontSize:10, color:T.gold, letterSpacing:1.5, marginBottom:4 }}>{pEmoji(card.player,players)} {players?.find(p=>p.name===card.player)?.short||card.player.split(" ").pop().toUpperCase()}</div>
+            <div style={{ fontFamily:"'DM Serif Display',serif", fontSize:17, color:T.text, lineHeight:1.25, marginBottom:6 }}>{card.parallel||card.series}</div>
+            <div style={{ fontSize:11, color:T.muted, lineHeight:1.5 }}>{card.year} {card.series}{card.sub_series&&` · ${card.sub_series}`}</div>
+          </div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:5, marginTop:8 }}>
+            {card.numbered&&<Chip label={card.numbered} color={T.gold} />}
+            <Chip label={STATUS[card.status]?.label||"持有"} color={STATUS[card.status]?.color||T.green} bg={STATUS[card.status]?.bg} />
+            <GChip grade={card.grade} />
+            {card.is_rc&&<Chip label="RC" color={T.green} />}
+          </div>
+        </div>
+      </div>
+      {/* Story section */}
+      <div style={{ borderTop:`1px solid ${T.border}`, margin:"0 16px" }} />
+      <div style={{ padding:"12px 20px" }}>
+        {!expanded ? (
+          <button onClick={loadStory} style={{ display:"flex", alignItems:"center", gap:6, background:"none", border:"none", color:T.gold, fontSize:12, cursor:"pointer", padding:0 }}>
+            <span>📖</span>
+            <span>查看球员故事{card.back_image?"（来自卡背）":"（AI生成）"}</span>
+            <span style={{ fontSize:10 }}>↓</span>
+          </button>
+        ) : (
+          <div style={{ animation:"fadeUp 0.4s ease both" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+              <span style={{ fontFamily:"'Space Mono',monospace", fontSize:10, color:T.dim, letterSpacing:1 }}>
+                {card.back_image ? "📷 卡背故事（中文翻译）" : "✨ AI 生成故事"}
+              </span>
+              <button onClick={()=>setExpanded(false)} style={{ background:"none", border:"none", color:T.dim, fontSize:12, cursor:"pointer" }}>收起 ↑</button>
+            </div>
+            {loadingStory ? (
+              <div style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 0", fontSize:12, color:T.muted }}>
+                <span style={{ animation:"pulse 1s ease infinite" }}>✨</span>
+                {card.back_image ? "正在读取卡背并翻译..." : "正在生成球员故事..."}
+              </div>
+            ) : (
+              <p style={{ fontSize:13, color:T.text, lineHeight:1.9, margin:0 }}>{story}</p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function HomeScreen() {
   const {cards,pcP,stats,loading,daily,nav,dc,toggleDC,rate}=useApp();
   if(loading)return <div style={{padding:"20px"}}><Skel height={24} width={160} style={{marginBottom:8}} /><Skel height={14} width={120} style={{marginBottom:24}} /><Skel height={220} radius={20} style={{marginBottom:20}} /><Skel height={80} radius={12} /></div>;
@@ -475,27 +569,7 @@ function HomeScreen() {
     <div style={{padding:"0 20px"}}>
       {daily&&<div style={{marginBottom:20,animation:"fadeUp 0.5s ease both"}}>
         <SHdr title="今日精选" sub="FROM YOUR VAULT" />
-        <div onClick={()=>nav("detail",daily)} style={{borderRadius:20,overflow:"hidden",cursor:"pointer",background:T.surface,border:`1px solid ${T.borderGold}`,boxShadow:`0 12px 40px rgba(0,0,0,0.4)`,position:"relative"}}>
-          <div style={{display:"flex",gap:18,padding:"20px 20px 16px"}}>
-            <div style={{width:100,height:140,borderRadius:10,background:daily.front_image?"#0a0a14":cGrad(daily.player,pcP),display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid rgba(255,255,255,0.12)",boxShadow:"0 8px 32px rgba(0,0,0,0.5)",animation:"cardFloat 5s ease-in-out infinite",overflow:"hidden",flexShrink:0}}>
-              {daily.front_image?<img src={daily.front_image} alt="" style={{width:"100%",height:"100%",objectFit:"contain"}} />:<><div style={{fontSize:40}}>{pEmoji(daily.player,pcP)}</div><div style={{fontFamily:"'Space Mono',monospace",fontSize:9,color:"rgba(255,255,255,0.6)",marginTop:4}}>{daily.card_number}</div>{daily.numbered&&<div style={{fontFamily:"'Space Mono',monospace",fontSize:12,color:T.goldLight,fontWeight:700}}>{daily.numbered}</div>}</>}
-            </div>
-            <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"space-between"}}>
-              <div>
-                <div style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.gold,letterSpacing:1.5,marginBottom:4}}>{pEmoji(daily.player,pcP)} {pcP?.find(p=>p.name===daily.player)?.short||daily.player.split(" ").pop().toUpperCase()}</div>
-                <div style={{fontFamily:"'DM Serif Display',serif",fontSize:17,color:T.text,lineHeight:1.25,marginBottom:6}}>{daily.parallel||daily.series}</div>
-                <div style={{fontSize:11,color:T.muted,lineHeight:1.5}}>{daily.year} {daily.series}{daily.sub_series&&` · ${daily.sub_series}`}</div>
-              </div>
-              <div style={{display:"flex",flexWrap:"wrap",gap:5,marginTop:8}}>
-                {daily.numbered&&<Chip label={daily.numbered} color={T.gold} />}
-                <Chip label={STATUS[daily.status]?.label||"持有"} color={STATUS[daily.status]?.color||T.green} bg={STATUS[daily.status]?.bg} />
-                <GChip grade={daily.grade} />
-                {daily.is_rc&&<Chip label="RC" color={T.green} />}
-              </div>
-            </div>
-          </div>
-          <div style={{padding:"4px 20px 14px",fontSize:12,color:T.dim,fontFamily:"'Space Mono',monospace",textAlign:"right"}}>点击查看详情 →</div>
-        </div>
+        <DailyCardFull card={daily} players={pcP} />
       </div>}
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:16,animation:"fadeUp 0.5s ease 100ms both"}}>
         {[{icon:"🃏",v:stats.total,l:"总卡数"},{icon:"❤️",v:stats.pc,l:"PC"},{icon:"📈",v:stats.inv,l:"投资"},{icon:"✨",v:stats.oneOfOnes,l:"1/1"}].map((s,i)=>(
@@ -567,63 +641,72 @@ function SearchScreen() {
 
 // ─── Market Price Panel ───────────────────────────────────
 function MarketPricePanel({ card }) {
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
-  const [err, setErr] = useState(null);
+  const [loading, setLoading]   = useState(false);
+  const [result, setResult]     = useState(null);
+  const [err, setErr]           = useState(null);
+  const [editing, setEditing]   = useState(false);
+  const [customQ, setCustomQ]   = useState("");
 
-  const query = async () => {
-    setLoading(true); setErr(null); setResult(null);
-    const r = await apiMarketPrice(card);
-    if (r.success) setResult(r);
+  // Build default search query
+  const parts = [card.player, card.year, card.series, card.parallel, card.numbered];
+  if (card.grade && card.grade !== "RAW") parts.push(card.grade);
+  const defaultQ = parts.filter(Boolean).join(" ");
+
+  const query = async (useCustom) => {
+    setLoading(true); setErr(null); setResult(null); setEditing(false);
+    const r = await apiMarketPrice({ ...card, customQuery: useCustom ? customQ : undefined });
+    if (r.success) { setResult(r); if (!customQ) setCustomQ(r.autoDesc || defaultQ); }
     else setErr(r.error);
     setLoading(false);
   };
 
   return (
     <div style={{ background:T.s2, border:`1px solid ${T.border}`, borderRadius:14, padding:16, marginBottom:12 }}>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:result||loading?12:0 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
         <div>
           <div style={{ fontFamily:"'Space Mono',monospace", fontSize:10, color:T.dim, letterSpacing:1, marginBottom:2 }}>MARKET PRICE</div>
           <div style={{ fontSize:12, color:T.muted }}>实时市场参考价</div>
         </div>
-        <button onClick={query} disabled={loading} style={{
+        <button onClick={()=>query(false)} disabled={loading} style={{
           padding:"8px 16px", borderRadius:10, border:"none",
           background:loading?T.s3:`linear-gradient(135deg,${T.gold},${T.goldDark})`,
           color:loading?T.dim:"#000", fontSize:12, fontWeight:700, cursor:loading?"not-allowed":"pointer",
-          transition:"all 0.2s", minWidth:80,
+          transition:"all 0.2s", minWidth:80, flexShrink:0,
         }}>
-          {loading ? (
-            <span style={{ display:"flex", alignItems:"center", gap:6 }}>
-              {[0,1,2].map(i=><span key={i} style={{ width:4, height:4, borderRadius:"50%", background:T.dim, display:"inline-block", animation:`pulse 0.8s ease ${i*150}ms infinite` }} />)}
-            </span>
-          ) : result ? "重新查询" : "🔍 查行情"}
+          {loading
+            ? <span style={{display:"flex",alignItems:"center",gap:4}}>{[0,1,2].map(i=><span key={i} style={{width:4,height:4,borderRadius:"50%",background:T.dim,display:"inline-block",animation:`pulse 0.8s ease ${i*150}ms infinite`}} />)}</span>
+            : result ? "重新查询" : "🔍 查行情"}
         </button>
       </div>
 
-      {loading && (
-        <div style={{ padding:"12px 0", fontSize:12, color:T.muted, display:"flex", alignItems:"center", gap:8 }}>
-          <span style={{ animation:"pulse 1s ease infinite" }}>🌐</span>
-          正在搜索 eBay 及市场数据...
-        </div>
-      )}
+      {/* Search query display + edit */}
+      <div style={{ marginBottom:12 }}>
+        {editing ? (
+          <div style={{ display:"flex", gap:8 }}>
+            <input value={customQ||defaultQ} onChange={e=>setCustomQ(e.target.value)}
+              style={{ flex:1, padding:"8px 10px", border:`1px solid ${T.borderGold}`, borderRadius:8, background:T.s3, color:T.text, fontSize:12, outline:"none" }} />
+            <button onClick={()=>query(true)} style={{ padding:"8px 14px", borderRadius:8, border:"none", background:T.gold, color:"#000", fontSize:12, fontWeight:700, cursor:"pointer" }}>搜索</button>
+            <button onClick={()=>setEditing(false)} style={{ padding:"8px 10px", borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.dim, fontSize:12, cursor:"pointer" }}>✕</button>
+          </div>
+        ) : (
+          <div style={{ display:"flex", alignItems:"center", gap:6, cursor:"pointer" }} onClick={()=>{ setCustomQ(customQ||defaultQ); setEditing(true); }}>
+            <span style={{ fontFamily:"'Space Mono',monospace", fontSize:10, color:T.dim, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+              {customQ || defaultQ}
+            </span>
+            <span style={{ fontSize:10, color:T.gold, flexShrink:0 }}>✎ 修改搜索词</span>
+          </div>
+        )}
+      </div>
 
-      {err && (
-        <div style={{ padding:"10px 12px", borderRadius:8, background:"rgba(212,80,80,0.08)", border:"1px solid rgba(212,80,80,0.2)", fontSize:12, color:T.red }}>
-          ⚠️ {err}
-        </div>
-      )}
+      {loading && <div style={{ padding:"8px 0", fontSize:12, color:T.muted, display:"flex", alignItems:"center", gap:8 }}><span style={{animation:"pulse 1s ease infinite"}}>🌐</span>正在搜索 eBay 及市场数据...</div>}
+      {err && <div style={{ padding:"10px 12px", borderRadius:8, background:"rgba(212,80,80,0.08)", border:"1px solid rgba(212,80,80,0.2)", fontSize:12, color:T.red }}>⚠️ {err}</div>}
 
       {result && (
         <div style={{ animation:"fadeUp 0.4s ease both" }}>
           <div style={{ fontSize:11, color:T.dim, marginBottom:8, fontFamily:"'Space Mono',monospace" }}>
             {result.searchUsed ? "🌐 基于实时搜索" : "📚 基于历史数据（仅供参考）"} · {new Date(result.timestamp).toLocaleTimeString("zh-CN")}
           </div>
-          <div style={{
-            fontSize:13, color:T.text, lineHeight:1.9,
-            whiteSpace:"pre-wrap", background:T.s3,
-            padding:"12px 14px", borderRadius:10,
-            borderLeft:`3px solid ${T.gold}`,
-          }}>
+          <div style={{ fontSize:13, color:T.text, lineHeight:1.9, whiteSpace:"pre-wrap", background:T.s3, padding:"12px 14px", borderRadius:10, borderLeft:`3px solid ${T.gold}` }}>
             {result.analysis}
           </div>
         </div>
