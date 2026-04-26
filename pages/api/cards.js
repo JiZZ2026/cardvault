@@ -4,6 +4,17 @@ export const config = {
   api: { bodyParser: { sizeLimit: "20mb" } },
 };
 
+// Convert empty strings to null for date/numeric fields
+function sanitize(card) {
+  const DATE_FIELDS = ["buy_date", "sell_date"];
+  const NUM_FIELDS  = ["buy_price", "sell_price"];
+  const out = { ...card };
+  DATE_FIELDS.forEach(f => { if (out[f] === "" || out[f] === undefined) out[f] = null; });
+  NUM_FIELDS.forEach(f  => { if (out[f] === "" || out[f] === undefined) out[f] = null; });
+  return out;
+}
+
+
 export default async function handler(req, res) {
   if (req.method === "GET") {
     const { data, error } = await supabase
@@ -15,7 +26,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === "POST") {
-    const card = req.body;
+    const card = sanitize(req.body);
     const { data, error } = await supabase
       .from("cards")
       .insert([card])
