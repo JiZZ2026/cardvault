@@ -179,6 +179,20 @@ const apiSaveStory = async (cardId, story) => {
   } catch(e) { console.error("Story save failed:", e); }
 };
 
+
+const apiRadar = async (cards, pcPlayers) => {
+  try {
+    const r = await fetch("/api/radar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cards, pcPlayers }),
+    });
+    const d = await r.json();
+    if (!r.ok) return { success: false, error: d.error };
+    return d;
+  } catch(e) { return { success: false, error: e.message }; }
+};
+
 // Context
 const Ctx = createContext(null);
 const useApp = () => useContext(Ctx);
@@ -188,6 +202,7 @@ function AppProvider({children}) {
   const [pcP]                = useState(PC_DEF);
   const [loading,setLoading] = useState(true);
   const [daily,setDaily]     = useState(null);
+  const [dailyHistory,setDailyHistory] = useState([]);
   const [screen,setScreen]   = useState("home");
   const [sel,setSel]         = useState(null);
   const [toast,setToast]     = useState(null);
@@ -201,7 +216,15 @@ function AppProvider({children}) {
     }
     const sc=localStorage.getItem("cv_c"); const sr=localStorage.getItem("cv_r");
     if(sc)setDC(sc); if(sr)setRate(parseFloat(sr));
-    apiGet().then(d=>{ setCards(d); if(d.length>0)setDaily(d[Math.floor(Math.random()*d.length)]); setLoading(false); });
+    apiGet().then(d=>{
+      setCards(d);
+      if(d.length>0){
+        const pick=d[Math.floor(Math.random()*d.length)];
+        setDaily(pick);
+        setDailyHistory([pick.id]);
+      }
+      setLoading(false);
+    });
   },[]);
 
   const toggleDC = useCallback(()=>setDC(c=>{ const n=c==="RMB"?"USD":"RMB"; localStorage.setItem("cv_c",n); return n; }),[]);
@@ -224,6 +247,15 @@ function AppProvider({children}) {
 
   const nav = useCallback((s,card=null)=>{ setSel(card); setScreen(s); },[]);
 
+  const refreshDaily = useCallback((allCards) => {
+    const pool = (allCards||cards).filter(c => !dailyHistory.includes(c.id));
+    const src = pool.length > 0 ? pool : (allCards||cards);
+    if (src.length === 0) return;
+    const pick = src[Math.floor(Math.random()*src.length)];
+    setDaily(pick);
+    setDailyHistory(h => [...h.slice(-10), pick.id]);
+  }, [cards, dailyHistory]);
+
   const stats = {
     total:cards.length, pc:cards.filter(c=>c.category==="PC").length,
     inv:cards.filter(c=>c.category==="investment").length,
@@ -235,7 +267,7 @@ function AppProvider({children}) {
     pnl:cards.filter(c=>c.status==="sold"&&c.sell_price).reduce((s,c)=>s+(parseFloat(c.sell_price)||0)-(parseFloat(c.buy_price)||0),0),
   };
 
-  return <Ctx.Provider value={{cards,pcP,loading,daily,screen,sel,stats,toast,dc,rate,toggleDC,nav,addCard,updCard,delCard,showToast}}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{cards,pcP,loading,daily,screen,sel,stats,toast,dc,rate,toggleDC,nav,refreshDaily,addCard,updCard,delCard,showToast}}>{children}</Ctx.Provider>;
 }
 
 // Shared UI
@@ -670,7 +702,7 @@ function DailyCardFull({ card, players }) {
 }
 
 function HomeScreen() {
-  const {cards,pcP,stats,loading,daily,nav,dc,toggleDC,rate}=useApp();
+  const {cards,pcP,stats,loading,daily,nav,refreshDaily,dc,toggleDC,rate}=useApp();
   if(loading) return (
     <div style={{padding:"20px"}}>
       <Skel height={24} width={140} style={{marginBottom:6}} />
@@ -701,7 +733,9 @@ function HomeScreen() {
         <div style={{padding:"0 16px 20px",animation:"fadeUp 0.5s ease both"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,padding:"0 4px"}}>
             <span style={{fontSize:17,fontWeight:600,color:T.text,letterSpacing:"-0.3px"}}>今日精选</span>
-            <span style={{fontSize:11,color:T.dim,fontFamily:"monospace",letterSpacing:1}}>FROM YOUR VAULT</span>
+            <button onClick={e=>{e.stopPropagation();refreshDaily();}} style={{background:"none",border:"none",color:T.gold,fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",gap:4,fontWeight:500,padding:0}}>
+              🔀 换一张
+            </button>
           </div>
           <DailyCardFull card={daily} players={pcP} />
         </div>
@@ -958,6 +992,13 @@ function DetailScreen() {
         </div>
       ))}
       {card.tags?.length>0&&<div style={{marginBottom:12}}><div style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,marginBottom:8,letterSpacing:1}}>TAGS</div><div style={{display:"flex",flexWrap:"wrap",gap:6}}>{card.tags.map(t=><span key={t} style={{padding:"4px 10px",borderRadius:6,background:T.s3,border:`1px solid ${T.border}`,color:T.muted,fontSize:11}}>#{t}</span>)}</div></div>}
+      {card.story&&<div style={{background:T.s2,border:`1px solid ${T.border}`,borderRadius:14,padding:16,marginBottom:12}}>
+        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:10}}>
+          <span style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,letterSpacing:1}}>PLAYER STORY</span>
+          <span style={{fontSize:10,color:T.dim}}>{card.back_image?"📷 来自卡背":"✨ AI生成"}</span>
+        </div>
+        <p style={{fontSize:13,color:T.text,lineHeight:1.9}}>{card.story}</p>
+      </div>}
       {card.notes&&<div style={{background:T.s2,border:`1px solid ${T.border}`,borderRadius:14,padding:16,marginBottom:12}}><div style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,marginBottom:8,letterSpacing:1}}>NOTES</div><p style={{fontSize:13,color:T.muted,lineHeight:1.8}}>{card.notes}</p></div>}
     </div>
   </div>;
@@ -987,7 +1028,12 @@ function PCScreen() {
   </div>;
 
   return <div style={{paddingBottom:90}}>
-    <div style={{padding:"24px 20px 16px"}}><h2 style={{fontFamily:"'Space Mono',monospace",fontSize:18,fontWeight:700,color:T.gold}}>PC VAULT</h2><p style={{fontSize:11,color:T.dim,marginTop:2}}>你热爱的球星</p></div>
+    <div style={{padding:"20px 20px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <div><h2 style={{fontSize:22,fontWeight:700,color:T.text,letterSpacing:"-0.4px"}}>PC Vault</h2><p style={{fontSize:12,color:T.muted,marginTop:3}}>你热爱的球星</p></div>
+      <button onClick={()=>nav("radar")} style={{padding:"8px 14px",borderRadius:12,border:`1px solid ${T.borderGold}`,background:`rgba(200,168,75,0.08)`,color:T.gold,fontSize:12,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:5}}>
+        🎯 补缺雷达
+      </button>
+    </div>
     <div style={{padding:"0 20px",display:"flex",flexDirection:"column",gap:14}}>
       {pcP.sort((a,b)=>a.display_order-b.display_order).map((player,i)=>{
         const pc=cards.filter(c=>c.player===player.name&&c.category==="PC");
@@ -1093,6 +1139,123 @@ function StatsScreen() {
       </div>
     </div>
   </div>;
+}
+
+
+// ─── Radar Screen ─────────────────────────────────────────
+function RadarScreen() {
+  const { cards, pcP, nav } = useApp();
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [err, setErr] = useState(null);
+  const [expanded, setExpanded] = useState({});
+
+  const run = async () => {
+    setLoading(true); setErr(null); setResult(null);
+    const r = await apiRadar(cards, pcP);
+    if (r.success) setResult(r);
+    else setErr(r.error);
+    setLoading(false);
+  };
+
+  const toggle = (name) => setExpanded(e => ({ ...e, [name]: !e[name] }));
+
+  const PRIORITY_COLOR = { "高": T.red, "中": T.orange, "低": T.muted };
+
+  return (
+    <div style={{ paddingBottom: 90 }}>
+      <div style={{ padding:"20px 20px 12px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+        <div>
+          <h2 style={{ fontSize:24, fontWeight:700, color:T.text, letterSpacing:"-0.5px" }}>补缺雷达</h2>
+          <p style={{ fontSize:12, color:T.muted, marginTop:3 }}>分析你的 PC 收藏缺口</p>
+        </div>
+        <button onClick={run} disabled={loading} style={{ padding:"10px 18px", borderRadius:12, border:"none", background:loading?T.s2:`linear-gradient(135deg,${T.gold},${T.goldDark})`, color:loading?T.dim:"#000", fontSize:13, fontWeight:700, cursor:loading?"not-allowed":"pointer", transition:"all 0.2s" }}>
+          {loading ? (
+            <span style={{ display:"flex", alignItems:"center", gap:6 }}>
+              {[0,1,2].map(i=><span key={i} style={{ width:4,height:4,borderRadius:"50%",background:T.dim,display:"inline-block",animation:`pulse 0.8s ease ${i*150}ms infinite` }} />)}
+            </span>
+          ) : result ? "🔄 重新分析" : "🎯 开始分析"}
+        </button>
+      </div>
+
+      <div style={{ padding:"0 16px" }}>
+        {!result && !loading && !err && (
+          <div style={{ background:T.s2, borderRadius:16, padding:20, marginBottom:16 }}>
+            <div style={{ fontSize:13, color:T.muted, lineHeight:1.8 }}>
+              AI 会分析你的 PC 球星卡收藏，找出缺失的重要卡片，帮你制定补缺计划。
+            </div>
+            <div style={{ marginTop:12, display:"flex", flexWrap:"wrap", gap:8 }}>
+              {pcP.map(p => (
+                <div key={p.id} style={{ display:"flex", alignItems:"center", gap:6, padding:"6px 12px", borderRadius:20, background:T.s3, fontSize:12, color:T.muted }}>
+                  <span>{p.emoji}</span><span>{p.short}</span>
+                  <span style={{ color:T.gold, fontWeight:600 }}>{cards.filter(c=>c.player===p.name&&c.category==="PC").length}张</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {err && (
+          <div style={{ padding:"12px 14px", borderRadius:10, background:"rgba(212,80,80,0.08)", border:"1px solid rgba(212,80,80,0.2)", fontSize:12, color:T.red, marginBottom:16 }}>
+            ⚠️ {err}
+          </div>
+        )}
+
+        {result && (
+          <div style={{ animation:"fadeUp 0.4s ease both" }}>
+            {result.overallTip && (
+              <div style={{ padding:"14px 16px", borderRadius:14, background:`linear-gradient(135deg,rgba(200,168,75,0.1),rgba(200,168,75,0.04))`, border:`1px solid ${T.borderGold}`, marginBottom:16, fontSize:13, color:T.text, lineHeight:1.7 }}>
+                💡 {result.overallTip}
+              </div>
+            )}
+
+            {result.players?.map((player, pi) => (
+              <div key={pi} style={{ background:T.s2, borderRadius:16, overflow:"hidden", marginBottom:12 }}>
+                {/* Player header */}
+                <div onClick={()=>toggle(player.name)} style={{ padding:"14px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", cursor:"pointer" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                    <span style={{ fontSize:28 }}>{pcP.find(p=>p.name===player.name)?.emoji||"🏀"}</span>
+                    <div>
+                      <div style={{ fontSize:15, fontWeight:600, color:T.text }}>{player.name}</div>
+                      <div style={{ fontSize:11, color:T.muted, marginTop:2 }}>收藏完整度 · <span style={{ color:T.gold, fontWeight:700 }}>{player.completeness}</span></div>
+                    </div>
+                  </div>
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <span style={{ fontSize:11, color:T.muted }}>{player.missing?.length||0} 项缺口</span>
+                    <span style={{ color:T.dim, fontSize:14 }}>{expanded[player.name]?"↑":"↓"}</span>
+                  </div>
+                </div>
+
+                {/* Completeness bar */}
+                <div style={{ height:2, background:T.s3, margin:"0 16px" }}>
+                  <div style={{ height:"100%", borderRadius:2, width:player.completeness, background:`linear-gradient(90deg,${T.gold},${T.goldLight})`, transition:"width 0.8s ease" }} />
+                </div>
+
+                {/* Missing cards */}
+                {expanded[player.name] && (
+                  <div style={{ padding:"12px 16px", animation:"fadeUp 0.3s ease both" }}>
+                    {player.tip && <p style={{ fontSize:12, color:T.muted, lineHeight:1.7, marginBottom:12, paddingBottom:12, borderBottom:`1px solid ${T.border}` }}>{player.tip}</p>}
+                    {player.missing?.map((item, ii) => (
+                      <div key={ii} style={{ display:"flex", gap:12, padding:"10px 0", borderBottom:ii<player.missing.length-1?`1px solid ${T.border}`:"none", alignItems:"flex-start" }}>
+                        <div style={{ width:32, height:32, borderRadius:8, background:`${PRIORITY_COLOR[item.priority]||T.muted}18`, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                          <span style={{ fontSize:10, fontWeight:700, color:PRIORITY_COLOR[item.priority]||T.muted }}>{item.priority}</span>
+                        </div>
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <div style={{ fontSize:13, fontWeight:600, color:T.text, marginBottom:2 }}>{item.card}</div>
+                          <div style={{ fontSize:11, color:T.muted, lineHeight:1.5, marginBottom:4 }}>{item.reason}</div>
+                          {item.estimatedPrice && <span style={{ fontSize:10, color:T.gold, fontFamily:"monospace", fontWeight:700 }}>{item.estimatedPrice}</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function TabBar() {
