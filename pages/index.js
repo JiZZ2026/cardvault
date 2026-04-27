@@ -645,51 +645,97 @@ function DailyCardFull({ card, players }) {
 
 function HomeScreen() {
   const {cards,pcP,stats,loading,daily,nav,dc,toggleDC,rate}=useApp();
-  if(loading)return <div style={{padding:"20px"}}><Skel height={24} width={160} style={{marginBottom:8}} /><Skel height={14} width={120} style={{marginBottom:24}} /><Skel height={220} radius={20} style={{marginBottom:20}} /><Skel height={80} radius={12} /></div>;
-  return <div style={{paddingBottom:90}}>
-    <div style={{padding:"20px 20px 8px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-      <div>
-        <h1 style={{fontSize:26,fontWeight:700,color:T.text,letterSpacing:"-0.6px",lineHeight:1.1}}>Card Vault</h1>
+  if(loading) return (
+    <div style={{padding:"20px"}}>
+      <Skel height={24} width={140} style={{marginBottom:6}} />
+      <Skel height={12} width={100} style={{marginBottom:28}} />
+      <Skel height={320} radius={20} style={{marginBottom:20}} />
+      <Skel height={100} radius={16} style={{marginBottom:16}} />
+      <Skel height={160} radius={14} />
+    </div>
+  );
+  return (
+    <div style={{paddingBottom:90}}>
+
+      {/* Header */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"20px 20px 12px"}}>
+        <div>
+          <h1 style={{fontSize:26,fontWeight:700,color:T.text,letterSpacing:"-0.5px",lineHeight:1.1,fontFamily:"'Inter',sans-serif"}}>Card Vault</h1>
           <p style={{fontSize:12,color:T.muted,marginTop:3}}>{new Date().toLocaleDateString("zh-CN",{month:"long",day:"numeric",weekday:"short"})}</p>
         </div>
-        <div style={{display:"flex",gap:10,alignItems:"center"}}>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
           <CurrBtn />
-        <button onClick={()=>nav("search")} style={{width:38,height:38,borderRadius:"50%",border:"none",background:T.s2,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,cursor:"pointer"}}>🔍</button>
-        <button onClick={()=>nav("add")} style={{width:38,height:38,borderRadius:"50%",border:"none",background:T.gold,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,cursor:"pointer"}}>📷</button>
+          <button onClick={()=>nav("search")} style={{width:38,height:38,borderRadius:"50%",border:"none",background:T.s2,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,cursor:"pointer",flexShrink:0}}>🔍</button>
+          <button onClick={()=>nav("add")} style={{width:38,height:38,borderRadius:"50%",border:"none",background:T.gold,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,cursor:"pointer",flexShrink:0}}>📷</button>
         </div>
-      {daily&&<div style={{marginBottom:20,animation:"fadeUp 0.5s ease both"}}>
-        <SHdr title="今日精选" sub="FROM YOUR VAULT" />
-        <DailyCardFull card={daily} players={pcP} />
-      </div>}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:16,animation:"fadeUp 0.5s ease 100ms both"}}>
-        {[{icon:"🃏",v:stats.total,l:"总卡数",go:"search"},{icon:"❤️",v:stats.pc,l:"PC",go:"pc"},{icon:"📈",v:stats.inv,l:"投资",go:"search"},{icon:"💎",v:stats.longhold,l:"长持",go:"search"}].map((s,i)=>(
-          <div key={i} onClick={()=>nav(s.go)} style={{padding:"16px 8px",borderRadius:18,textAlign:"center",background:T.s2,cursor:"pointer",transition:"all 0.15s"}}
-            onMouseEnter={e=>e.currentTarget.style.background=T.s3}
-            onMouseLeave={e=>e.currentTarget.style.background=T.s2}>
-            <div style={{fontSize:13,marginBottom:6}}>{s.icon}</div>
-            <div style={{fontSize:24,fontWeight:700,color:T.text,letterSpacing:"-0.5px",lineHeight:1}}>{s.v}</div>
-            <div style={{fontSize:11,color:T.muted,marginTop:5,fontWeight:400}}>{s.l}</div>
+      </div>
+
+      {/* Daily Featured */}
+      {daily && (
+        <div style={{padding:"0 16px 20px",animation:"fadeUp 0.5s ease both"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,padding:"0 4px"}}>
+            <span style={{fontSize:17,fontWeight:600,color:T.text,letterSpacing:"-0.3px"}}>今日精选</span>
+            <span style={{fontSize:11,color:T.dim,fontFamily:"monospace",letterSpacing:1}}>FROM YOUR VAULT</span>
           </div>
-        ))}
+          <DailyCardFull card={daily} players={pcP} />
+        </div>
+      )}
+
+      {/* Stats Grid */}
+      <div style={{padding:"0 16px 16px",animation:"fadeUp 0.5s ease 80ms both"}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
+          {[
+            {icon:"🃏",v:stats.total,l:"总卡数",go:"search"},
+            {icon:"❤️",v:stats.pc,l:"PC",go:"pc"},
+            {icon:"📈",v:stats.inv,l:"投资",go:"search"},
+            {icon:"💎",v:stats.longhold,l:"长持",go:"search"},
+          ].map((s,i)=>(
+            <div key={i} onClick={()=>nav(s.go)} style={{padding:"14px 6px",borderRadius:16,textAlign:"center",background:T.s2,cursor:"pointer",transition:"background 0.15s"}}
+              onMouseEnter={e=>e.currentTarget.style.background=T.s3}
+              onMouseLeave={e=>e.currentTarget.style.background=T.s2}>
+              <div style={{fontSize:18,marginBottom:6}}>{s.icon}</div>
+              <div style={{fontSize:22,fontWeight:700,color:T.text,letterSpacing:"-0.5px",lineHeight:1}}>{s.v}</div>
+              <div style={{fontSize:10,color:T.muted,marginTop:4}}>{s.l}</div>
+            </div>
+          ))}
+        </div>
       </div>
-      {stats.cost>0&&<div style={{padding:"12px 16px",borderRadius:12,marginBottom:20,background:`linear-gradient(135deg,rgba(201,168,76,0.08),rgba(201,168,76,0.03))`,border:`1px solid ${T.borderGold}`,animation:"fadeUp 0.5s ease 150ms both"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <span style={{fontSize:12,color:T.muted}}>持仓总成本</span>
-          <span style={{fontFamily:"'Space Mono',monospace",fontSize:16,fontWeight:700,color:T.gold}}>{fmtP(stats.cost,dc,rate)}</span>
+
+      {/* Cost */}
+      {stats.cost>0 && (
+        <div style={{margin:"0 16px 16px",padding:"14px 16px",borderRadius:16,background:`linear-gradient(135deg,rgba(200,168,75,0.1),rgba(200,168,75,0.04))`,border:`1px solid rgba(200,168,75,0.2)`,animation:"fadeUp 0.5s ease 120ms both"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontSize:13,color:T.muted}}>持仓总成本</span>
+            <span style={{fontSize:18,fontWeight:700,color:T.gold,fontFamily:"monospace"}}>{fmtP(stats.cost,dc,rate)}</span>
+          </div>
+          <div style={{textAlign:"right",marginTop:2}}>
+            <span style={{fontSize:11,color:T.dim}}>≈ {dc==="RMB"?fmtDual(stats.cost,rate).usd:fmtDual(stats.cost,rate).rmb}</span>
+          </div>
         </div>
-        <div style={{display:"flex",justifyContent:"flex-end",marginTop:3}}>
-          <span style={{fontSize:10,color:T.dim}}>≈ {dc==="RMB"?fmtDual(stats.cost,rate).usd:fmtDual(stats.cost,rate).rmb}</span>
+      )}
+
+      {/* Recent */}
+      <div style={{padding:"0 16px",animation:"fadeUp 0.5s ease 160ms both"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <span style={{fontSize:17,fontWeight:600,color:T.text,letterSpacing:"-0.3px"}}>最近入库</span>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <span style={{fontSize:12,color:T.muted}}>{cards.length} 张</span>
+            <button onClick={()=>nav("search")} style={{background:"none",border:"none",color:T.gold,fontSize:13,cursor:"pointer",padding:0,fontWeight:500}}>全部</button>
+          </div>
         </div>
-      </div>}
-      <div style={{animation:"fadeUp 0.5s ease 250ms both"}}>
-        <SHdr title="最近入库" sub={`共 ${cards.length} 张`} action="全部" onAction={()=>nav("search")} />
-        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
           {cards.slice(0,5).map(c=><CardRow key={c.id} card={c} ps={pcP} onClick={()=>nav("detail",c)} />)}
-          {cards.length===0&&<div style={{textAlign:"center",padding:"48px 0",color:T.dim}}><div style={{fontSize:48,marginBottom:12}}>🃏</div><div style={{fontSize:14}}>还没有卡片，点右上角📷开始录入</div></div>}
+          {cards.length===0 && (
+            <div style={{textAlign:"center",padding:"48px 0",color:T.dim}}>
+              <div style={{fontSize:48,marginBottom:12}}>🃏</div>
+              <div style={{fontSize:14}}>还没有卡片，点右上角📷开始录入</div>
+            </div>
+          )}
         </div>
       </div>
+
     </div>
-  </div>;
+  );
 }
 
 function SearchScreen() {
@@ -1062,12 +1108,10 @@ export default function CardVault() {
       <link rel="manifest" href="/manifest.json" />
     </Head>
     <AppProvider>
-      <div style={{minHeight:"100vh",background:"#000",fontFamily:"'Inter','Noto Sans SC',sans-serif",color:T.text}}>
-      <div style={{maxWidth:480,margin:"0 auto",minHeight:"100vh",background:T.bg,position:"relative",overflowX:"hidden"}}>
+      <div style={{minHeight:"100vh",background:T.bg,maxWidth:480,margin:"0 auto",position:"relative",overflowX:"hidden",fontFamily:"'Inter','Noto Sans SC',sans-serif",color:T.text}}>
         <Router />
         <TabBar />
         <TL />
-      </div>
       </div>
     </AppProvider>
   </>;
