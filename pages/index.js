@@ -586,7 +586,7 @@ function DailyCardFull({ card, players }) {
       onClick={()=>nav("detail", card)}>
 
       {/* Hero image — full width, tall */}
-      <div style={{ width:"100%", aspectRatio:"3/4", maxHeight:420, background:hasPhoto?"#000":grad, position:"relative", overflow:"hidden" }}>
+      <div style={{ width:"100%", height:"min(calc(100vw * 4/3), 400px)", maxHeight:400, background:hasPhoto?"#000":grad, position:"relative", overflow:"hidden" }}>
         {hasPhoto
           ? <img src={card.front_image} alt={card.player}
               style={{ width:"100%", height:"100%", objectFit:"contain", display:"block" }} />
@@ -647,15 +647,15 @@ function HomeScreen() {
   const {cards,pcP,stats,loading,daily,nav,dc,toggleDC,rate}=useApp();
   if(loading)return <div style={{padding:"20px"}}><Skel height={24} width={160} style={{marginBottom:8}} /><Skel height={14} width={120} style={{marginBottom:24}} /><Skel height={220} radius={20} style={{marginBottom:20}} /><Skel height={80} radius={12} /></div>;
   return <div style={{paddingBottom:90}}>
-    <div style={{padding:"24px 20px 16px",display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+    <div style={{padding:"20px 20px 8px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
       <div>
-          <h1 style={{fontSize:28,fontWeight:700,color:T.text,letterSpacing:"-0.8px",lineHeight:1}}>Card Vault</h1>
+        <h1 style={{fontSize:26,fontWeight:700,color:T.text,letterSpacing:"-0.6px",lineHeight:1.1}}>Card Vault</h1>
           <p style={{fontSize:12,color:T.muted,marginTop:3}}>{new Date().toLocaleDateString("zh-CN",{month:"long",day:"numeric",weekday:"short"})}</p>
         </div>
         <div style={{display:"flex",gap:10,alignItems:"center"}}>
           <CurrBtn />
-          <button onClick={()=>nav("search")} style={{width:40,height:40,borderRadius:"50%",border:"none",background:T.s2,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,cursor:"pointer"}}>🔍</button>
-          <button onClick={()=>nav("add")} style={{width:40,height:40,borderRadius:"50%",border:"none",background:T.gold,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,cursor:"pointer"}}>📷</button>
+        <button onClick={()=>nav("search")} style={{width:38,height:38,borderRadius:"50%",border:"none",background:T.s2,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,cursor:"pointer"}}>🔍</button>
+        <button onClick={()=>nav("add")} style={{width:38,height:38,borderRadius:"50%",border:"none",background:T.gold,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,cursor:"pointer"}}>📷</button>
         </div>
       {daily&&<div style={{marginBottom:20,animation:"fadeUp 0.5s ease both"}}>
         <SHdr title="今日精选" sub="FROM YOUR VAULT" />
@@ -1062,10 +1062,12 @@ export default function CardVault() {
       <link rel="manifest" href="/manifest.json" />
     </Head>
     <AppProvider>
-      <div style={{minHeight:"100vh",background:T.bg,maxWidth:480,margin:"0 auto",position:"relative",overflowX:"hidden",fontFamily:"'Inter','Noto Sans SC',sans-serif",color:T.text}}>
+      <div style={{minHeight:"100vh",background:"#000",fontFamily:"'Inter','Noto Sans SC',sans-serif",color:T.text}}>
+      <div style={{maxWidth:480,margin:"0 auto",minHeight:"100vh",background:T.bg,position:"relative",overflowX:"hidden"}}>
         <Router />
         <TabBar />
         <TL />
+      </div>
       </div>
     </AppProvider>
   </>;
