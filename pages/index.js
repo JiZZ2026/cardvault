@@ -74,8 +74,9 @@ function cGrad(player, ps) {
 const pEmoji = (name, ps) => ps?.find(p => p.name === name)?.emoji || "🏀";
 
 function fmtP(n, dc="RMB", rate=DEF_RATE, sc="RMB") {
-  if (!n || isNaN(Number(n))) return "—";
+  if (n === null || n === undefined || n === "") return "—";
   const v = Number(n);
+  if (isNaN(v)) return "—";
   if (dc === "RMB") { const rmb = sc==="USD"?v*rate:v; return `¥${Math.round(rmb).toLocaleString("zh-CN")}`; }
   else { const usd = sc==="RMB"?v/rate:v; return `$${Math.round(usd).toLocaleString("en-US")}`; }
 }
@@ -268,7 +269,7 @@ function CardRow({card,onClick,ps,style={}}) {
       </div>
     </div>
     <div style={{textAlign:"right",flexShrink:0}}>
-      {card.buy_price&&<div style={{fontSize:14,fontWeight:600,color:T.text}}>{fmtP(card.buy_price,dc,rate,card.price_currency||"RMB")}</div>}
+      {(card.buy_price!==null&&card.buy_price!==undefined&&card.buy_price!=="")&&<div style={{fontSize:14,fontWeight:600,color:T.text}}>{fmtP(card.buy_price,dc,rate,card.price_currency||"RMB")}</div>}
       {card.location&&<div style={{fontSize:10,color:T.dim,marginTop:3}}>📍{card.location}</div>}
     </div>
   </div>;
@@ -402,7 +403,7 @@ function PhotoBox({label,image,onCapture}) {
   const ref=useRef();
   const handle=async e=>{ const f=e.target.files?.[0]; if(!f)return; onCapture(await toB64(f)); };
   return <div onClick={()=>ref.current?.click()} style={{width:145,height:200,borderRadius:14,cursor:"pointer",background:image?"#0a0a14":T.s2,border:`2px dashed ${image?T.borderGold:T.border}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden",position:"relative",transition:"all 0.2s"}}>
-    <input ref={ref} type="file" accept="image/*" capture="environment" onChange={handle} style={{display:"none"}} />
+    <input ref={ref} type="file" accept="image/*" onChange={handle} style={{display:"none"}} />
     {image?(<><img src={image} alt="" style={{width:"100%",height:"100%",objectFit:"contain"}} /><div style={{position:"absolute",top:8,right:8,padding:"3px 8px",background:"rgba(61,170,106,0.9)",borderRadius:6,fontFamily:"'Space Mono',monospace",fontSize:10,color:"#fff",fontWeight:700}}>✓</div></>):
     (<><div style={{fontSize:32,marginBottom:8}}>📷</div><div style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.dim,fontWeight:700}}>{label}</div><div style={{fontSize:10,color:T.dim,marginTop:4}}>点击拍摄</div></>)}
   </div>;
@@ -727,7 +728,7 @@ function HomeScreen() {
       </div>
 
       {/* Cost */}
-      {stats.cost>0 && (
+      {(stats.cost!==null&&stats.cost>0) && (
         <div style={{margin:"0 16px 16px",padding:"14px 16px",borderRadius:16,background:`linear-gradient(135deg,rgba(200,168,75,0.1),rgba(200,168,75,0.04))`,border:`1px solid rgba(200,168,75,0.2)`,animation:"fadeUp 0.5s ease 120ms both"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <span style={{fontSize:13,color:T.muted}}>持仓总成本</span>
