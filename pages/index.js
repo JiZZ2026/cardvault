@@ -144,6 +144,27 @@ const apiCardStory = async (card) => {
   return d;
 };
 
+
+const apiVerifyCard = async (card) => {
+  try {
+    const r = await fetch("/api/verify-card", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        player: card.player,
+        year: card.year,
+        series: card.series,
+        parallel: card.parallel,
+        numbered: card.numbered,
+        manufacturer: card.manufacturer,
+      }),
+    });
+    const d = await r.json();
+    if (!r.ok) return null;
+    return d;
+  } catch { return null; }
+};
+
 // Context
 const Ctx = createContext(null);
 const useApp = () => useContext(Ctx);
@@ -160,6 +181,10 @@ function AppProvider({children}) {
   const [rate,setRate]       = useState(DEF_RATE);
 
   useEffect(() => {
+    // Register service worker for PWA
+    if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    }
     const sc=localStorage.getItem("cv_c"); const sr=localStorage.getItem("cv_r");
     if(sc)setDC(sc); if(sr)setRate(parseFloat(sr));
     apiGet().then(d=>{ setCards(d); if(d.length>0)setDaily(d[Math.floor(Math.random()*d.length)]); setLoading(false); });
@@ -313,6 +338,51 @@ function buildTags(form) {
   return [...new Set(tags)];
 }
 
+
+// ─── Verification Panel ───────────────────────────────────
+function VerificationBanner({ result, onApplySuggestion }) {
+  if (!result) return null;
+
+  const issues = [];
+  if (result.parallelValid === false) issues.push("parallel");
+  if (result.seriesValid === false) issues.push("series");
+  if (result.numberedValid === false) issues.push("numbered");
+
+  if (issues.length === 0 && result.confidence !== "low") {
+    return (
+      <div style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 14px", borderRadius:10, background:"rgba(61,170,106,0.08)", border:"1px solid rgba(61,170,106,0.2)", marginBottom:14 }}>
+        <span style={{ fontSize:14 }}>✅</span>
+        <span style={{ fontSize:12, color:T.green }}>卡片信息已验证，与官方 checklist 一致</span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding:"12px 14px", borderRadius:10, background:"rgba(224,120,48,0.08)", border:"1px solid rgba(224,120,48,0.25)", marginBottom:14 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:8 }}>
+        <span style={{ fontSize:14 }}>⚠️</span>
+        <span style={{ fontSize:12, color:T.orange, fontWeight:700 }}>识别信息需要确认</span>
+      </div>
+      {result.notes && <p style={{ fontSize:12, color:T.muted, lineHeight:1.7, marginBottom:result.parallelSuggestions?.length?10:0 }}>{result.notes}</p>}
+      {result.parallelValid === false && result.parallelSuggestions?.length > 0 && (
+        <div>
+          <div style={{ fontSize:11, color:T.dim, marginBottom:6, fontFamily:"'Space Mono',monospace" }}>该系列实际存在的平行类型：</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+            {result.parallelSuggestions.map((s, i) => (
+              <button key={i} onClick={() => onApplySuggestion("parallel", s)} style={{
+                padding:"5px 12px", borderRadius:8, border:`1px solid ${T.borderGold}`,
+                background:`rgba(201,168,76,0.1)`, color:T.gold, fontSize:11, cursor:"pointer",
+              }}>
+                {s} ✓
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PhotoBox({label,image,onCapture}) {
   const ref=useRef();
   const handle=async e=>{ const f=e.target.files?.[0]; if(!f)return; onCapture(await toB64(f)); };
@@ -345,11 +415,12 @@ function AddScreen() {
   const [anim,setAnim]=useState([]); const [rec,setRec]=useState(null);
   const [err,setErr]=useState(null); const [form,setForm]=useState(EMPTY());
   const [saving,setSaving]=useState(false); const [tab,setTab]=useState("card");
+  const [verifyResult,setVerifyResult]=useState(null);
   const set=k=>v=>setForm(f=>({...f,[k]:v}));
 
   const recognize=async()=>{
     if(!front&&!back)return;
-    setStep("recognizing"); setErr(null); setAnim([]);
+    setStep("recognizing"); setErr(null); setAnim([]); setVerifyResult(null);
     try {
       const [cf,cb]=await Promise.all([front?compressImg(front,1400,0.88):null,back?compressImg(back,1400,0.88):null]);
       const r=await apiRecognize(cf,cb);
@@ -427,6 +498,7 @@ function AddScreen() {
         ))}
         {rec&&<Chip label={rec.confidence==="high"?"识别准确":rec.confidence==="medium"?"需确认":"请核对"} color={rec.confidence==="high"?T.green:rec.confidence==="medium"?T.orange:T.red} style={{alignSelf:"flex-start",marginTop:4,fontSize:10,padding:"4px 10px"}} />}
       </div>}
+      <VerificationBanner result={verifyResult} onApplySuggestion={(field, value) => set(field)(value)} />
       <CardFormFields form={form} set={set} tab={tab} setTab={setTab} />
       <button onClick={save} disabled={saving||!form.player} style={{width:"100%",padding:"14px",borderRadius:14,border:"none",marginTop:8,background:form.player?`linear-gradient(135deg,${T.gold},${T.goldDark})`:T.s3,color:form.player?"#000":T.dim,fontSize:15,fontWeight:700,boxShadow:form.player?`0 4px 20px rgba(201,168,76,0.25)`:"none"}}>
         {saving?"保存中...":"✓ 确认入库"}
@@ -441,6 +513,7 @@ function EditScreen() {
   const [back,setBack]=useState(card?.back_image||null);
   const [form,setForm]=useState(()=>card?{...EMPTY(),player:card.player||"",team:card.team||"",year:card.year||"",series:card.series||"",manufacturer:card.manufacturer||"",card_number:card.card_number||"",parallel:card.parallel||"",numbered:card.numbered||"",is_one_of_one:card.is_one_of_one||false,sub_series:card.sub_series||"",is_rc:card.is_rc||false,grade:card.grade||"RAW",grade_company:card.grade_company||"",grade_score:card.grade_score||"",category:card.category||"PC",status:card.status||"holding",price_currency:card.price_currency||"RMB",buy_price:card.buy_price||"",buy_date:card.buy_date||"",sell_price:card.sell_price||"",sell_date:card.sell_date||"",source:card.source||"",location:card.location||"",notes:card.notes||"",tags:Array.isArray(card.tags)?card.tags.join(", "):(card.tags||"")}:EMPTY());
   const [saving,setSaving]=useState(false); const [tab,setTab]=useState("card");
+  const [verifyResult,setVerifyResult]=useState(null);
   if(!card){nav("home");return null;}
   const set=k=>v=>setForm(f=>({...f,[k]:v}));
 
