@@ -2,11 +2,16 @@ import { useState, useEffect, useCallback, useRef, createContext, useContext } f
 import Head from "next/head";
 
 const T = {
-  gold:"#C9A84C", goldLight:"#E8C97A", goldDark:"#8B6914",
-  bg:"#080810", surface:"#0E0E1A", s2:"#141422", s3:"#1C1C2E",
-  border:"rgba(255,255,255,0.06)", borderGold:"rgba(201,168,76,0.25)",
-  text:"#F0EEE8", muted:"#7A7A8C", dim:"#4A4A5E",
-  green:"#3DAA6A", blue:"#4A9EFF", orange:"#E07830", red:"#D45050",
+  // Gold — more restrained, used as accent only
+  gold:"#C8A84B", goldLight:"#E2C870", goldDark:"#8A6612",
+  // Backgrounds — true dark, Apple-style depth layers
+  bg:"#000000", surface:"#0A0A0A", s2:"#111111", s3:"#1A1A1A",
+  // Borders — very subtle
+  border:"rgba(255,255,255,0.07)", borderGold:"rgba(200,168,75,0.3)",
+  // Text — high contrast, Instagram-style clarity
+  text:"#FFFFFF", muted:"#8E8E93", dim:"#48484A",
+  // Semantic
+  green:"#30D158", blue:"#0A84FF", orange:"#FF9F0A", red:"#FF453A",
 };
 const STATUS = {
   holding:  { label:"持有",   color:T.green,  bg:"rgba(61,170,106,0.1)"  },
@@ -225,7 +230,7 @@ function AppProvider({children}) {
 }
 
 // Shared UI
-function Chip({label,color,bg,style={}}) { return <span style={{display:"inline-flex",alignItems:"center",padding:"3px 8px",borderRadius:5,background:bg||`${color}18`,color,fontSize:10,fontWeight:700,fontFamily:"'Space Mono',monospace",letterSpacing:0.3,flexShrink:0,...style}}>{label}</span>; }
+function Chip({label,color,bg,style={}}) { return <span style={{display:"inline-flex",alignItems:"center",padding:"3px 10px",borderRadius:20,background:bg||`${color}15`,color,fontSize:10,fontWeight:600,letterSpacing:0.2,flexShrink:0,...style}}>{label}</span>; }
 function GChip({grade}) { if(!grade||grade==="RAW")return null; const p=grade==="PSA 10",b=grade.startsWith("BGS"); return <Chip label={grade} color={p?"#FFD700":b?"#C0C0C0":T.muted} bg={p?"rgba(255,215,0,0.12)":b?"rgba(192,192,192,0.1)":"rgba(122,122,140,0.1)"} />; }
 function Thumb({card,size=56,ps}) {
   const img=card?.front_image;
@@ -237,29 +242,30 @@ function Thumb({card,size=56,ps}) {
 }
 function CardRow({card,onClick,ps,style={}}) {
   const {dc,rate}=useApp(); const st=STATUS[card.status]||STATUS.holding;
-  return <div onClick={onClick} style={{display:"flex",gap:14,padding:"14px 16px",borderRadius:14,cursor:"pointer",alignItems:"center",background:T.s2,border:`1px solid ${T.border}`,transition:"all 0.2s",...style}}
-    onMouseEnter={e=>{e.currentTarget.style.borderColor=T.borderGold;e.currentTarget.style.transform="translateY(-1px)"}}
-    onMouseLeave={e=>{e.currentTarget.style.borderColor=T.border;e.currentTarget.style.transform="none"}}>
-    <Thumb card={card} size={52} ps={ps} />
+  return <div onClick={onClick} style={{display:"flex",gap:14,padding:"12px 14px",borderRadius:16,cursor:"pointer",alignItems:"center",background:T.s2,border:`1px solid ${T.border}`,transition:"all 0.18s",...style}}
+    onMouseEnter={e=>{e.currentTarget.style.background=T.s3;}}
+    onMouseLeave={e=>{e.currentTarget.style.background=T.s2;}}>
+    <Thumb card={card} size={56} ps={ps} />
     <div style={{flex:1,minWidth:0}}>
-      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
-        <span style={{fontFamily:"'DM Serif Display',serif",fontSize:14,fontWeight:700,color:T.text}}>{card.player}</span>
-        {card.is_rc&&<Chip label="RC" color={T.green} style={{fontSize:9,padding:"2px 5px"}} />}
+      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
+        <span style={{fontSize:15,fontWeight:600,color:T.text,letterSpacing:"-0.2px"}}>{card.player}</span>
+        {card.is_rc&&<span style={{fontSize:9,fontWeight:700,color:T.green,background:"rgba(48,209,88,0.12)",padding:"2px 6px",borderRadius:4}}>RC</span>}
       </div>
-      <div style={{fontSize:11,color:T.muted,marginBottom:5,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{card.year} {card.series}{card.parallel?` · ${card.parallel}`:""}</div>
-      <div style={{display:"flex",gap:5,overflow:"hidden"}}>
-        {card.numbered&&<Chip label={card.numbered} color={T.gold} style={{fontSize:9,padding:"2px 5px"}} />}
-        <Chip label={st.label} color={st.color} bg={st.bg} style={{fontSize:9,padding:"2px 5px"}} />
-        <GChip grade={card.grade} />
+      <div style={{fontSize:12,color:T.muted,marginBottom:6,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{card.year} · {card.parallel||card.series}</div>
+      <div style={{display:"flex",gap:5,overflow:"hidden",alignItems:"center"}}>
+        {card.numbered&&<span style={{fontSize:10,fontWeight:700,color:T.gold}}>{card.numbered}</span>}
+        {card.numbered&&<span style={{color:T.dim,fontSize:10}}>·</span>}
+        <span style={{fontSize:10,color:st.color,fontWeight:500}}>{st.label}</span>
+        {card.grade&&card.grade!=="RAW"&&<><span style={{color:T.dim,fontSize:10}}>·</span><span style={{fontSize:10,color:T.muted}}>{card.grade}</span></>}
       </div>
     </div>
     <div style={{textAlign:"right",flexShrink:0}}>
-      {card.buy_price&&<div style={{fontFamily:"'Space Mono',monospace",fontSize:13,fontWeight:700,color:T.gold}}>{fmtP(card.buy_price,dc,rate,card.price_currency||"RMB")}</div>}
-      <div style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,marginTop:3}}>📍{card.location||"—"}</div>
+      {card.buy_price&&<div style={{fontSize:14,fontWeight:600,color:T.text}}>{fmtP(card.buy_price,dc,rate,card.price_currency||"RMB")}</div>}
+      {card.location&&<div style={{fontSize:10,color:T.dim,marginTop:3}}>📍{card.location}</div>}
     </div>
   </div>;
 }
-function SHdr({title,sub,action,onAction}) { return <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:14}}><div><span style={{fontFamily:"'DM Serif Display',serif",fontSize:15,color:T.text}}>{title}</span>{sub&&<span style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,marginLeft:8}}>{sub}</span>}</div>{action&&<button onClick={onAction} style={{background:"none",border:"none",color:T.gold,fontSize:11,cursor:"pointer",padding:0}}>{action} →</button>}</div>; }
+function SHdr({title,sub,action,onAction}) { return <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}><div><span style={{fontSize:17,fontWeight:600,color:T.text,letterSpacing:"-0.3px"}}>{title}</span>{sub&&<span style={{fontSize:12,color:T.muted,marginLeft:6}}>{sub}</span>}</div>{action&&<button onClick={onAction} style={{background:"none",border:"none",color:T.gold,fontSize:13,cursor:"pointer",padding:0,fontWeight:500}}>{action}</button>}</div>; }
 function Skel({width="100%",height=16,radius=6,style={}}) { return <div style={{width,height,borderRadius:radius,background:`linear-gradient(90deg,${T.s2} 25%,${T.s3} 50%,${T.s2} 75%)`,backgroundSize:"200% 100%",animation:"shimmer 1.5s infinite",...style}} />; }
 function ToastView({toast}) { if(!toast)return null; return <div style={{position:"fixed",top:20,left:"50%",transform:"translateX(-50%)",padding:"10px 20px",borderRadius:10,zIndex:999,background:toast.type==="warn"?"rgba(224,120,48,0.9)":"rgba(61,170,106,0.9)",color:"#fff",fontSize:13,fontWeight:600,boxShadow:"0 4px 20px rgba(0,0,0,0.4)",backdropFilter:"blur(8px)",animation:"fadeUp 0.3s ease both",whiteSpace:"nowrap"}}>{toast.msg}</div>; }
 function CurrBtn() { const {dc,toggleDC}=useApp(); return <button onClick={toggleDC} style={{padding:"6px 12px",borderRadius:8,border:`1px solid ${T.borderGold}`,background:`rgba(201,168,76,0.08)`,color:T.gold,fontFamily:"'Space Mono',monospace",fontSize:11,fontWeight:700,cursor:"pointer"}}>{dc==="RMB"?"¥ RMB":"$ USD"}</button>; }
@@ -453,7 +459,7 @@ function AddScreen() {
     </div>
     <div style={{padding:"24px 20px"}}>
       <StepBar cur={0} />
-      <div style={{fontFamily:"'DM Serif Display',serif",fontSize:18,color:T.text,marginBottom:6}}>拍摄卡片正反面</div>
+      <div style={{fontFamily:"'Inter',sans-serif",fontSize:18,color:T.text,marginBottom:6}}>拍摄卡片正反面</div>
       <p style={{fontSize:12,color:T.muted,lineHeight:1.7,marginBottom:24}}>拍完正反面，AI 自动识别全部信息，确认后一键入库。</p>
       <div style={{display:"flex",gap:16,justifyContent:"center",marginBottom:24}}>
         <div style={{textAlign:"center"}}><PhotoBox label="正面" image={front} onCapture={setFront} /><div style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,marginTop:8}}>FRONT</div></div>
@@ -475,7 +481,7 @@ function AddScreen() {
       <div style={{display:"flex",gap:12,marginBottom:20}}>
         {[front,back].filter(Boolean).map((img,i)=><div key={i} style={{width:72,height:101,borderRadius:9,overflow:"hidden",border:`1px solid ${T.border}`}}><img src={img} alt="" style={{width:"100%",height:"100%",objectFit:"contain",background:"#0a0a14"}} /></div>)}
         <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"center",gap:8}}>
-          <div style={{fontFamily:"'DM Serif Display',serif",fontSize:15,color:T.text}}>正在识别卡片信息</div>
+          <div style={{fontFamily:"'Inter',sans-serif",fontSize:15,color:T.text}}>正在识别卡片信息</div>
           <div style={{display:"flex",gap:5}}>{[0,1,2].map(i=><div key={i} style={{width:6,height:6,borderRadius:"50%",background:T.gold,animation:`pulse 1s ease ${i*200}ms infinite`}} />)}</div>
         </div>
       </div>
@@ -551,78 +557,88 @@ function EditScreen() {
   </div>;
 }
 
-// ─── Daily Card with Story ────────────────────────────────
+// ─── Daily Card — Image-First, Pinterest Style ────────────
 function DailyCardFull({ card, players }) {
   const { nav } = useApp();
   const [story, setStory] = useState(null);
   const [loadingStory, setLoadingStory] = useState(false);
-  const [expanded, setExpanded] = useState(false);
+  const [showStory, setShowStory] = useState(false);
 
   const loadStory = async () => {
-    if (story) { setExpanded(e=>!e); return; }
-    setExpanded(true);
-    setLoadingStory(true);
-    const r = await apiCardStory(card);
-    if (r.success) setStory(r.story);
-    else setStory("暂时无法加载故事，请稍后重试。");
-    setLoadingStory(false);
+    if (!showStory) {
+      setShowStory(true);
+      if (!story) {
+        setLoadingStory(true);
+        const r = await apiCardStory(card);
+        setStory(r.success ? r.story : "暂时无法加载故事。");
+        setLoadingStory(false);
+      }
+    } else {
+      setShowStory(false);
+    }
   };
 
+  const hasPhoto = !!card.front_image;
+  const grad = cGrad(card.player, players);
+
   return (
-    <div style={{ borderRadius:20, overflow:"hidden", background:T.surface, border:`1px solid ${T.borderGold}`, boxShadow:`0 12px 40px rgba(0,0,0,0.4)`, position:"relative" }}>
-      <div style={{ position:"absolute", inset:0, pointerEvents:"none", background:`radial-gradient(ellipse at 30% 50%,rgba(201,168,76,0.04) 0%,transparent 70%)` }} />
-      {/* Card content */}
-      <div style={{ display:"flex", gap:18, padding:"20px 20px 16px", cursor:"pointer" }} onClick={()=>nav("detail", card)}>
-        <div style={{ position:"relative", flexShrink:0 }}>
-          <div style={{ width:100, height:140, borderRadius:10, background:card.front_image?"#0a0a14":cGrad(card.player,players), display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", border:"1px solid rgba(255,255,255,0.12)", boxShadow:"0 8px 32px rgba(0,0,0,0.5)", animation:"cardFloat 5s ease-in-out infinite", overflow:"hidden" }}>
-            {card.front_image
-              ? <img src={card.front_image} alt="" style={{ width:"100%", height:"100%", objectFit:"contain" }} />
-              : <><div style={{ fontSize:40 }}>{pEmoji(card.player,players)}</div><div style={{ fontFamily:"'Space Mono',monospace", fontSize:9, color:"rgba(255,255,255,0.6)", marginTop:4 }}>{card.card_number}</div>{card.numbered&&<div style={{ fontFamily:"'Space Mono',monospace", fontSize:12, color:T.goldLight, fontWeight:700 }}>{card.numbered}</div>}</>}
-          </div>
-          {card.is_one_of_one&&<div style={{ position:"absolute", bottom:-6, left:"50%", transform:"translateX(-50%)", padding:"3px 8px", borderRadius:4, background:T.gold, color:"#000", fontFamily:"'Space Mono',monospace", fontSize:8, fontWeight:700, whiteSpace:"nowrap" }}>1 OF 1</div>}
-        </div>
-        <div style={{ flex:1, display:"flex", flexDirection:"column", justifyContent:"space-between" }}>
-          <div>
-            <div style={{ fontFamily:"'Space Mono',monospace", fontSize:10, color:T.gold, letterSpacing:1.5, marginBottom:4 }}>{pEmoji(card.player,players)} {players?.find(p=>p.name===card.player)?.short||card.player.split(" ").pop().toUpperCase()}</div>
-            <div style={{ fontFamily:"'DM Serif Display',serif", fontSize:17, color:T.text, lineHeight:1.25, marginBottom:6 }}>{card.parallel||card.series}</div>
-            <div style={{ fontSize:11, color:T.muted, lineHeight:1.5 }}>{card.year} {card.series}{card.sub_series&&` · ${card.sub_series}`}</div>
-          </div>
-          <div style={{ display:"flex", flexWrap:"wrap", gap:5, marginTop:8 }}>
-            {card.numbered&&<Chip label={card.numbered} color={T.gold} />}
-            <Chip label={STATUS[card.status]?.label||"持有"} color={STATUS[card.status]?.color||T.green} bg={STATUS[card.status]?.bg} />
-            <GChip grade={card.grade} />
-            {card.is_rc&&<Chip label="RC" color={T.green} />}
-          </div>
-        </div>
-      </div>
-      {/* Story section */}
-      <div style={{ borderTop:`1px solid ${T.border}`, margin:"0 16px" }} />
-      <div style={{ padding:"12px 20px" }}>
-        {!expanded ? (
-          <button onClick={loadStory} style={{ display:"flex", alignItems:"center", gap:6, background:"none", border:"none", color:T.gold, fontSize:12, cursor:"pointer", padding:0 }}>
-            <span>📖</span>
-            <span>查看球员故事{card.back_image?"（来自卡背）":"（AI生成）"}</span>
-            <span style={{ fontSize:10 }}>↓</span>
-          </button>
-        ) : (
-          <div style={{ animation:"fadeUp 0.4s ease both" }}>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
-              <span style={{ fontFamily:"'Space Mono',monospace", fontSize:10, color:T.dim, letterSpacing:1 }}>
-                {card.back_image ? "📷 卡背故事（中文翻译）" : "✨ AI 生成故事"}
-              </span>
-              <button onClick={()=>setExpanded(false)} style={{ background:"none", border:"none", color:T.dim, fontSize:12, cursor:"pointer" }}>收起 ↑</button>
+    <div style={{ borderRadius:24, overflow:"hidden", background:T.s2, cursor:"pointer", boxShadow:"0 2px 20px rgba(0,0,0,0.5)" }}
+      onClick={()=>nav("detail", card)}>
+
+      {/* Hero image — full width, tall */}
+      <div style={{ width:"100%", aspectRatio:"3/4", maxHeight:420, background:hasPhoto?"#000":grad, position:"relative", overflow:"hidden" }}>
+        {hasPhoto
+          ? <img src={card.front_image} alt={card.player}
+              style={{ width:"100%", height:"100%", objectFit:"contain", display:"block" }} />
+          : <div style={{ width:"100%", height:"100%", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:12 }}>
+              <span style={{ fontSize:80 }}>{pEmoji(card.player, players)}</span>
+              <span style={{ fontSize:15, color:"rgba(255,255,255,0.5)", fontWeight:500 }}>{card.player}</span>
             </div>
-            {loadingStory ? (
-              <div style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 0", fontSize:12, color:T.muted }}>
-                <span style={{ animation:"pulse 1s ease infinite" }}>✨</span>
-                {card.back_image ? "正在读取卡背并翻译..." : "正在生成球员故事..."}
-              </div>
-            ) : (
-              <p style={{ fontSize:13, color:T.text, lineHeight:1.9, margin:0 }}>{story}</p>
-            )}
+        }
+        {/* Gradient overlay at bottom */}
+        <div style={{ position:"absolute", bottom:0, left:0, right:0, height:"50%", background:"linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 100%)", pointerEvents:"none" }} />
+        {/* Info overlay */}
+        <div style={{ position:"absolute", bottom:0, left:0, right:0, padding:"20px 20px 16px" }}>
+          <div style={{ fontSize:11, color:"rgba(255,255,255,0.55)", marginBottom:4, fontWeight:500 }}>
+            {card.year} · {card.series}
           </div>
-        )}
+          <div style={{ fontSize:22, fontWeight:700, color:"#fff", lineHeight:1.2, marginBottom:10 }}>
+            {card.player}
+          </div>
+          <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+            {card.numbered && <span style={{ padding:"3px 10px", borderRadius:20, background:"rgba(200,168,75,0.9)", color:"#000", fontSize:11, fontWeight:700 }}>{card.numbered}</span>}
+            {card.is_one_of_one && <span style={{ padding:"3px 10px", borderRadius:20, background:"rgba(255,215,0,0.9)", color:"#000", fontSize:11, fontWeight:700 }}>1 OF 1</span>}
+            {card.is_rc && <span style={{ padding:"3px 10px", borderRadius:20, background:"rgba(48,209,88,0.85)", color:"#000", fontSize:11, fontWeight:700 }}>RC</span>}
+            <span style={{ padding:"3px 10px", borderRadius:20, background:"rgba(255,255,255,0.15)", color:"#fff", fontSize:11, backdropFilter:"blur(8px)" }}>{STATUS[card.status]?.label||"持有"}</span>
+          </div>
+        </div>
       </div>
+
+      {/* Card meta row */}
+      <div style={{ padding:"14px 16px 4px", display:"flex", justifyContent:"space-between", alignItems:"center" }}
+        onClick={e=>{e.stopPropagation();}}>
+        <div>
+          <div style={{ fontSize:13, color:T.muted, fontWeight:400 }}>{card.parallel || "Base"}</div>
+        </div>
+        <button
+          onClick={e=>{ e.stopPropagation(); loadStory(); }}
+          style={{ background:"none", border:"none", color:T.gold, fontSize:12, cursor:"pointer", padding:"4px 0", display:"flex", alignItems:"center", gap:4, fontWeight:500 }}>
+          {showStory ? "收起 ↑" : "📖 故事"}
+        </button>
+      </div>
+
+      {/* Story */}
+      {showStory && (
+        <div style={{ padding:"0 16px 16px", animation:"fadeUp 0.3s ease both" }}>
+          {loadingStory
+            ? <div style={{ fontSize:12, color:T.muted, padding:"8px 0" }}>
+                <span style={{ animation:"pulse 1s ease infinite" }}>✨ </span>
+                {card.back_image ? "读取卡背故事..." : "生成球员故事..."}
+              </div>
+            : <p style={{ fontSize:13, color:T.muted, lineHeight:1.8, margin:0 }}>{story}</p>
+          }
+        </div>
+      )}
     </div>
   );
 }
@@ -632,27 +648,27 @@ function HomeScreen() {
   if(loading)return <div style={{padding:"20px"}}><Skel height={24} width={160} style={{marginBottom:8}} /><Skel height={14} width={120} style={{marginBottom:24}} /><Skel height={220} radius={20} style={{marginBottom:20}} /><Skel height={80} radius={12} /></div>;
   return <div style={{paddingBottom:90}}>
     <div style={{padding:"24px 20px 16px",display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-      <div><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:20}}>🃏</span><h1 style={{fontFamily:"'Space Mono',monospace",fontSize:18,fontWeight:700,color:T.gold,letterSpacing:"-0.5px"}}>CARD VAULT</h1></div>
-      <p style={{fontSize:11,color:T.dim,marginTop:2,paddingLeft:28}}>{new Date().toLocaleDateString("zh-CN",{month:"long",day:"numeric",weekday:"short"})}</p></div>
-      <div style={{display:"flex",gap:8,alignItems:"center"}}>
-        <CurrBtn />
-        <button onClick={()=>nav("search")} style={{width:38,height:38,borderRadius:10,border:`1px solid ${T.border}`,background:T.s2,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>🔍</button>
-        <button onClick={()=>nav("add")} style={{width:38,height:38,borderRadius:10,border:`1px solid ${T.borderGold}`,background:`rgba(201,168,76,0.1)`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>📷</button>
-      </div>
-    </div>
-    <div style={{padding:"0 20px"}}>
+      <div>
+          <h1 style={{fontSize:28,fontWeight:700,color:T.text,letterSpacing:"-0.8px",lineHeight:1}}>Card Vault</h1>
+          <p style={{fontSize:12,color:T.muted,marginTop:3}}>{new Date().toLocaleDateString("zh-CN",{month:"long",day:"numeric",weekday:"short"})}</p>
+        </div>
+        <div style={{display:"flex",gap:10,alignItems:"center"}}>
+          <CurrBtn />
+          <button onClick={()=>nav("search")} style={{width:40,height:40,borderRadius:"50%",border:"none",background:T.s2,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,cursor:"pointer"}}>🔍</button>
+          <button onClick={()=>nav("add")} style={{width:40,height:40,borderRadius:"50%",border:"none",background:T.gold,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,cursor:"pointer"}}>📷</button>
+        </div>
       {daily&&<div style={{marginBottom:20,animation:"fadeUp 0.5s ease both"}}>
         <SHdr title="今日精选" sub="FROM YOUR VAULT" />
         <DailyCardFull card={daily} players={pcP} />
       </div>}
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:16,animation:"fadeUp 0.5s ease 100ms both"}}>
         {[{icon:"🃏",v:stats.total,l:"总卡数",go:"search"},{icon:"❤️",v:stats.pc,l:"PC",go:"pc"},{icon:"📈",v:stats.inv,l:"投资",go:"search"},{icon:"💎",v:stats.longhold,l:"长持",go:"search"}].map((s,i)=>(
-          <div key={i} onClick={()=>nav(s.go)} style={{padding:"12px 8px",borderRadius:12,textAlign:"center",background:T.s2,border:`1px solid ${T.border}`,cursor:"pointer",transition:"all 0.2s"}}
-            onMouseEnter={e=>{e.currentTarget.style.borderColor=T.borderGold;e.currentTarget.style.transform="translateY(-2px)"}}
-            onMouseLeave={e=>{e.currentTarget.style.borderColor=T.border;e.currentTarget.style.transform="none"}}>
-            <div style={{fontSize:16,marginBottom:4}}>{s.icon}</div>
-            <div style={{fontFamily:"'Space Mono',monospace",fontSize:18,fontWeight:700,color:T.text}}>{s.v}</div>
-            <div style={{fontSize:10,color:T.dim,marginTop:1}}>{s.l}</div>
+          <div key={i} onClick={()=>nav(s.go)} style={{padding:"16px 8px",borderRadius:18,textAlign:"center",background:T.s2,cursor:"pointer",transition:"all 0.15s"}}
+            onMouseEnter={e=>e.currentTarget.style.background=T.s3}
+            onMouseLeave={e=>e.currentTarget.style.background=T.s2}>
+            <div style={{fontSize:13,marginBottom:6}}>{s.icon}</div>
+            <div style={{fontSize:24,fontWeight:700,color:T.text,letterSpacing:"-0.5px",lineHeight:1}}>{s.v}</div>
+            <div style={{fontSize:11,color:T.muted,marginTop:5,fontWeight:400}}>{s.l}</div>
           </div>
         ))}
       </div>
@@ -833,7 +849,7 @@ function DetailScreen() {
         </div>
       </div>
       <div style={{textAlign:"center",marginBottom:20}}>
-        <h2 style={{fontFamily:"'DM Serif Display',serif",fontSize:22,color:T.text,marginBottom:6}}>{card.player}</h2>
+        <h2 style={{fontFamily:"'Inter',sans-serif",fontSize:22,color:T.text,marginBottom:6}}>{card.player}</h2>
         <p style={{fontSize:13,color:T.muted}}>{card.year} {card.series}{card.sub_series?` · ${card.sub_series}`:""}</p>
         <div style={{display:"flex",justifyContent:"center",flexWrap:"wrap",gap:6,marginTop:10}}>
           {card.numbered&&<Chip label={card.numbered} color={T.gold} />}
@@ -888,7 +904,7 @@ function PCScreen() {
     <div style={{padding:"20px 20px 0"}}>
       {(()=>{const p=pcP.find(x=>x.name===sel);return p&&<div style={{display:"flex",alignItems:"center",gap:14,marginBottom:20}}>
         <span style={{fontSize:42}}>{p.emoji}</span>
-        <div><div style={{fontFamily:"'DM Serif Display',serif",fontSize:20,color:T.text}}>{p.name}</div>
+        <div><div style={{fontFamily:"'Inter',sans-serif",fontSize:20,color:T.text}}>{p.name}</div>
         <div style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.dim,marginTop:2}}>{pCards.length} 张 · {fmtP(pCards.reduce((s,c)=>s+(parseFloat(c.buy_price)||0),0),dc,rate)}</div></div>
       </div>;})()}
     </div>
@@ -909,7 +925,7 @@ function PCScreen() {
           <div style={{padding:"18px 20px",background:`linear-gradient(135deg,${player.color1}30,${player.color2}20)`,borderBottom:pc.length>0?`1px solid ${T.border}`:"none",display:"flex",alignItems:"center",gap:14}}>
             <span style={{fontSize:36}}>{player.emoji}</span>
             <div style={{flex:1}}>
-              <div style={{fontFamily:"'DM Serif Display',serif",fontSize:17,color:T.text}}>{player.name}</div>
+              <div style={{fontFamily:"'Inter',sans-serif",fontSize:17,color:T.text}}>{player.name}</div>
               <div style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.dim,marginTop:2}}>{pc.length} 张 · {fmtP(val,dc,rate)}</div>
               {pc.length>0&&<div style={{display:"flex",gap:6,marginTop:6}}>
                 {Object.entries(stC).filter(([,v])=>v>0).map(([k,v])=><Chip key={k} label={`${STATUS[k].label} ${v}`} color={STATUS[k].color} bg={STATUS[k].bg} style={{fontSize:9,padding:"2px 6px"}} />)}
@@ -1009,10 +1025,10 @@ function StatsScreen() {
 
 function TabBar() {
   const {screen,nav}=useApp();
-  return <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,display:"flex",justifyContent:"space-around",padding:"8px 0 max(16px, env(safe-area-inset-bottom))",background:"rgba(8,8,16,0.96)",backdropFilter:"blur(20px)",borderTop:`1px solid ${T.border}`,zIndex:100}}>
+  return <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,display:"flex",justifyContent:"space-around",padding:"10px 0 max(18px, env(safe-area-inset-bottom))",background:"rgba(0,0,0,0.92)",backdropFilter:"blur(30px) saturate(180%)",borderTop:"1px solid rgba(255,255,255,0.08)",zIndex:100}}>
     {[{id:"home",l:"首页",i:"⬜"},{id:"search",l:"搜索",i:"🔍"},{id:"add"},{id:"pc",l:"PC",i:"❤️"},{id:"stats",l:"统计",i:"📊"}].map(tab=>{
       if(tab.id==="add") return <button key="add" onClick={()=>nav("add")} style={{position:"relative",background:"none",border:"none",padding:0,marginTop:-18}}>
-        <div style={{width:52,height:52,borderRadius:16,background:`linear-gradient(135deg,${T.gold},${T.goldDark})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,boxShadow:`0 4px 20px rgba(201,168,76,0.4)`,border:`2px solid rgba(201,168,76,0.3)`}}>📷</div>
+        <div style={{width:56,height:56,borderRadius:"50%",background:T.gold,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,boxShadow:`0 4px 24px rgba(200,168,75,0.5)`}}>📷</div>
       </button>;
       const active=screen===tab.id||((tab.id==="home")&&["detail","add","edit"].includes(screen));
       return <button key={tab.id} onClick={()=>nav(tab.id)} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,background:"none",border:"none",padding:"4px 12px",color:active?T.gold:T.dim,transition:"color 0.2s"}}>
@@ -1046,7 +1062,7 @@ export default function CardVault() {
       <link rel="manifest" href="/manifest.json" />
     </Head>
     <AppProvider>
-      <div style={{minHeight:"100vh",background:T.bg,maxWidth:480,margin:"0 auto",position:"relative",overflowX:"hidden",fontFamily:"'Noto Sans SC',sans-serif",color:T.text}}>
+      <div style={{minHeight:"100vh",background:T.bg,maxWidth:480,margin:"0 auto",position:"relative",overflowX:"hidden",fontFamily:"'Inter','Noto Sans SC',sans-serif",color:T.text}}>
         <Router />
         <TabBar />
         <TL />
