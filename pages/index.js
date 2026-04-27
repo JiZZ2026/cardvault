@@ -642,16 +642,22 @@ function DailyCardFull({ card, players }) {
           <div style={{ height:1, background:T.border, marginBottom:10 }} />
 
           {/* Story */}
-          <div style={{ flex:1, overflow:"hidden" }}>
+          <div style={{ flex:1, overflow:"hidden", position:"relative" }}>
             {loadingStory ? (
               <div style={{ display:"flex", alignItems:"center", gap:6, fontSize:11, color:T.dim }}>
                 <span style={{ animation:"pulse 1s ease infinite" }}>✨</span>
                 <span>生成故事中...</span>
               </div>
             ) : story ? (
-              <p style={{ fontSize:11, color:T.muted, lineHeight:1.75, margin:0, display:"-webkit-box", WebkitLineClamp:7, WebkitBoxOrient:"vertical", overflow:"hidden" }}>
-                {story}
-              </p>
+              <div
+                onClick={e=>e.stopPropagation()}
+                style={{ maxHeight:140, overflowY:"auto", scrollbarWidth:"none", msOverflowStyle:"none" }}
+              >
+                <style>{".story-scroll::-webkit-scrollbar{display:none}"}</style>
+                <p className="story-scroll" style={{ fontSize:11, color:T.muted, lineHeight:1.75, margin:0 }}>
+                  {story}
+                </p>
+              </div>
             ) : (
               <p style={{ fontSize:11, color:T.dim, lineHeight:1.6, margin:0 }}>暂无故事</p>
             )}
