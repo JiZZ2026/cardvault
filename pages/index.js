@@ -966,6 +966,15 @@ function DetailScreen() {
           <Chip label={CAT[card.category]?.label} color={CAT[card.category]?.color} />
         </div>
       </div>
+{card.story && (
+        <div style={{background:T.s2,border:`1px solid ${T.border}`,borderRadius:14,padding:16,marginBottom:12}}>
+          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:10}}>
+            <span style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,letterSpacing:1}}>PLAYER STORY</span>
+            <span style={{fontSize:10,color:T.dim}}>{card.back_image?"📷 来自卡背":"✨ AI生成"}</span>
+          </div>
+          <p style={{fontSize:13,color:T.text,lineHeight:1.9,margin:0}}>{card.story}</p>
+        </div>
+      )}
       {card.buy_price&&<div style={{background:`linear-gradient(135deg,rgba(201,168,76,0.08),rgba(201,168,76,0.03))`,border:`1px solid ${T.borderGold}`,borderRadius:14,padding:"14px 16px",marginBottom:16}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div><div style={{fontSize:11,color:T.muted,marginBottom:4}}>买入价</div><div style={{fontFamily:"'Space Mono',monospace",fontSize:20,fontWeight:700,color:T.gold}}>{dual.rmb}</div><div style={{fontFamily:"'Space Mono',monospace",fontSize:12,color:T.dim,marginTop:2}}>≈ {dual.usd}</div></div>
@@ -992,13 +1001,6 @@ function DetailScreen() {
         </div>
       ))}
       {card.tags?.length>0&&<div style={{marginBottom:12}}><div style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,marginBottom:8,letterSpacing:1}}>TAGS</div><div style={{display:"flex",flexWrap:"wrap",gap:6}}>{card.tags.map(t=><span key={t} style={{padding:"4px 10px",borderRadius:6,background:T.s3,border:`1px solid ${T.border}`,color:T.muted,fontSize:11}}>#{t}</span>)}</div></div>}
-      {card.story&&<div style={{background:T.s2,border:`1px solid ${T.border}`,borderRadius:14,padding:16,marginBottom:12}}>
-        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:10}}>
-          <span style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,letterSpacing:1}}>PLAYER STORY</span>
-          <span style={{fontSize:10,color:T.dim}}>{card.back_image?"📷 来自卡背":"✨ AI生成"}</span>
-        </div>
-        <p style={{fontSize:13,color:T.text,lineHeight:1.9}}>{card.story}</p>
-      </div>}
       {card.notes&&<div style={{background:T.s2,border:`1px solid ${T.border}`,borderRadius:14,padding:16,marginBottom:12}}><div style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,marginBottom:8,letterSpacing:1}}>NOTES</div><p style={{fontSize:13,color:T.muted,lineHeight:1.8}}>{card.notes}</p></div>}
     </div>
   </div>;
@@ -1284,6 +1286,7 @@ function Router() {
     case "pc": return <PCScreen />;
     case "stats": return <StatsScreen />;
     case "detail": return <DetailScreen />;
+    case "radar":  return <RadarScreen />;
     default: return <HomeScreen />;
   }
 }
