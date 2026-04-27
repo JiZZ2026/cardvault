@@ -14,7 +14,7 @@ const STATUS = {
   grading:  { label:"送评中", color:T.blue,   bg:"rgba(74,158,255,0.1)"  },
   sold:     { label:"已出",   color:T.muted,  bg:"rgba(122,122,140,0.1)" },
 };
-const CAT = { PC:{label:"PC",color:T.gold}, investment:{label:"投资",color:T.blue}, other:{label:"其他",color:T.muted} };
+const CAT = { PC:{label:"PC",color:T.gold}, investment:{label:"投资",color:T.blue}, longhold:{label:"长持",color:"#9B6DFF"}, other:{label:"其他",color:T.muted} };
 const PC_DEF = [
   { id:"p_kg", name:"Kevin Garnett",        short:"KG",     emoji:"🐺", color1:"#1D6B3F", color2:"#0E3D23", display_order:1 },
   { id:"p_sc", name:"Stephen Curry",         short:"Curry",  emoji:"🎯", color1:"#1D428A", color2:"#FFC72C", display_order:2 },
@@ -216,6 +216,7 @@ function AppProvider({children}) {
     grading:cards.filter(c=>c.status==="grading").length,
     forSale:cards.filter(c=>c.status==="for_sale").length,
     oneOfOnes:cards.filter(c=>c.is_one_of_one).length,
+    longhold:cards.filter(c=>c.category==="longhold").length,
     cost:cards.reduce((s,c)=>s+(parseFloat(c.buy_price)||0),0),
     pnl:cards.filter(c=>c.status==="sold"&&c.sell_price).reduce((s,c)=>s+(parseFloat(c.sell_price)||0)-(parseFloat(c.buy_price)||0),0),
   };
@@ -296,7 +297,7 @@ function CardFormFields({form,set,tab,setTab}) {
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
         <FF label="评级"><Sl value={form.grade} onChange={v=>{set("grade")(v);if(v!=="RAW"){set("grade_company")(v.split(" ")[0]);set("grade_score")(v.split(" ")[1]||"");}}} options={[["RAW","RAW"],["PSA 10","PSA 10"],["PSA 9","PSA 9"],["BGS 9.5","BGS 9.5"],["BGS 9","BGS 9"],["SGC 10","SGC 10"],["SGC 9.5","SGC 9.5"]]} /></FF>
-        <FF label="分类"><Sl value={form.category} onChange={set("category")} options={[["PC","PC（热爱）"],["investment","投资"],["other","其他"]]} /></FF>
+        <FF label="分类"><Sl value={form.category} onChange={set("category")} options={[["PC","PC（热爱）"],["investment","投资"],["longhold","长持（看好长期）"],["other","其他"]]} /></FF>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
         <Tog label="新秀卡 RC" value={form.is_rc} onChange={set("is_rc")} />
@@ -645,8 +646,10 @@ function HomeScreen() {
         <DailyCardFull card={daily} players={pcP} />
       </div>}
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:16,animation:"fadeUp 0.5s ease 100ms both"}}>
-        {[{icon:"🃏",v:stats.total,l:"总卡数"},{icon:"❤️",v:stats.pc,l:"PC"},{icon:"📈",v:stats.inv,l:"投资"},{icon:"✨",v:stats.oneOfOnes,l:"1/1"}].map((s,i)=>(
-          <div key={i} style={{padding:"12px 8px",borderRadius:12,textAlign:"center",background:T.s2,border:`1px solid ${T.border}`}}>
+        {[{icon:"🃏",v:stats.total,l:"总卡数",go:"search"},{icon:"❤️",v:stats.pc,l:"PC",go:"pc"},{icon:"📈",v:stats.inv,l:"投资",go:"search"},{icon:"💎",v:stats.longhold,l:"长持",go:"search"}].map((s,i)=>(
+          <div key={i} onClick={()=>nav(s.go)} style={{padding:"12px 8px",borderRadius:12,textAlign:"center",background:T.s2,border:`1px solid ${T.border}`,cursor:"pointer",transition:"all 0.2s"}}
+            onMouseEnter={e=>{e.currentTarget.style.borderColor=T.borderGold;e.currentTarget.style.transform="translateY(-2px)"}}
+            onMouseLeave={e=>{e.currentTarget.style.borderColor=T.border;e.currentTarget.style.transform="none"}}>
             <div style={{fontSize:16,marginBottom:4}}>{s.icon}</div>
             <div style={{fontFamily:"'Space Mono',monospace",fontSize:18,fontWeight:700,color:T.text}}>{s.v}</div>
             <div style={{fontSize:10,color:T.dim,marginTop:1}}>{s.l}</div>
@@ -675,12 +678,17 @@ function HomeScreen() {
 
 function SearchScreen() {
   const {cards,pcP,nav}=useApp();
-  const [q,setQ]=useState(""); const [cf,setCf]=useState("all"); const [pf,setPf]=useState("all");
+  const [q,setQ]=useState(""); const [cf,setCf]=useState("all"); const [pf,setPf]=useState("all"); const [yf,setYf]=useState("all");
   const ref=useRef(); useEffect(()=>{setTimeout(()=>ref.current?.focus(),100);},[]);
+
+  // Get sorted unique years from cards
+  const years = ["all",...[...new Set(cards.map(c=>c.year).filter(Boolean))].sort((a,b)=>b.localeCompare(a))];
+
   const list=cards.filter(c=>{
     if(cf!=="all"&&c.category!==cf)return false;
     if(pf!=="all"&&c.player!==pf)return false;
-    if(q){const terms=expandQ(q);const fields=[c.player,c.series,c.parallel,c.card_number,c.numbered,c.grade,c.team,c.sub_series,...(c.tags||[])].filter(Boolean).map(f=>f.toLowerCase());return terms.some(t=>fields.some(f=>f.includes(t)));}
+    if(yf!=="all"&&c.year!==yf)return false;
+    if(q){const terms=expandQ(q);const fields=[c.player,c.series,c.parallel,c.card_number,c.numbered,c.grade,c.team,c.sub_series,c.year,...(c.tags||[])].filter(Boolean).map(f=>f.toLowerCase());return terms.some(t=>fields.some(f=>f.includes(t)));}
     return true;
   });
   return <div style={{paddingBottom:90}}>
@@ -692,14 +700,20 @@ function SearchScreen() {
           onFocus={e=>e.target.style.borderColor=T.gold} onBlur={e=>e.target.style.borderColor=T.border} />
       </div>
       <div style={{display:"flex",gap:8,marginTop:10,overflowX:"auto",scrollbarWidth:"none",paddingBottom:2}}>
-        {[["all","全部"],["PC","PC"],["investment","投资"]].map(([v,l])=>(
+        {[["all","全部"],["PC","PC"],["investment","投资"],["longhold","长持"]].map(([v,l])=>(
           <button key={v} onClick={()=>setCf(v)} style={{padding:"6px 14px",borderRadius:8,border:`1px solid ${cf===v?T.borderGold:T.border}`,background:cf===v?"rgba(201,168,76,0.1)":"transparent",color:cf===v?T.gold:T.muted,fontSize:12,whiteSpace:"nowrap"}}>{l}</button>
         ))}
         <div style={{width:1,background:T.border,margin:"4px 2px"}} />
-        {[["all","全部"],...pcP.map(p=>[p.name,`${p.emoji} ${p.short}`])].map(([v,l])=>(
+        {[["all","全部球星"],...pcP.map(p=>[p.name,`${p.emoji} ${p.short}`])].map(([v,l])=>(
           <button key={v} onClick={()=>setPf(v)} style={{padding:"6px 14px",borderRadius:8,border:`1px solid ${pf===v?T.borderGold:T.border}`,background:pf===v?"rgba(201,168,76,0.1)":"transparent",color:pf===v?T.gold:T.muted,fontSize:12,whiteSpace:"nowrap"}}>{l}</button>
         ))}
       </div>
+      {years.length>2&&<div style={{display:"flex",gap:8,marginTop:6,overflowX:"auto",scrollbarWidth:"none",paddingBottom:4}}>
+        <span style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,alignSelf:"center",flexShrink:0,paddingLeft:4}}>📅</span>
+        {years.map(v=>(
+          <button key={v} onClick={()=>setYf(v)} style={{padding:"5px 12px",borderRadius:8,border:`1px solid ${yf===v?T.borderGold:T.border}`,background:yf===v?"rgba(201,168,76,0.1)":"transparent",color:yf===v?T.gold:T.muted,fontSize:11,whiteSpace:"nowrap",fontFamily:"'Space Mono',monospace"}}>{v==="all"?"全部年份":v}</button>
+        ))}
+      </div>}
     </div>
     <div style={{padding:"0 20px"}}>
       <div style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,marginBottom:12}}>{list.length} 张卡片</div>
