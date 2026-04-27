@@ -5,11 +5,13 @@ export const config = {
 };
 
 function sanitize(card) {
+  // Only sanitize fields that are explicitly present in the payload
+  // Never set fields to null if they weren't included in the update
   const DATE_FIELDS = ["buy_date", "sell_date"];
   const NUM_FIELDS  = ["buy_price", "sell_price"];
   const out = { ...card };
-  DATE_FIELDS.forEach(f => { if (out[f] === "" || out[f] === undefined) out[f] = null; });
-  NUM_FIELDS.forEach(f  => { if (out[f] === "" || out[f] === undefined) out[f] = null; });
+  DATE_FIELDS.forEach(f => { if (f in out && out[f] === "") out[f] = null; });
+  NUM_FIELDS.forEach(f  => { if (f in out && out[f] === "") out[f] = null; });
   return out;
 }
 
