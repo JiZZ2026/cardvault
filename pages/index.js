@@ -170,6 +170,14 @@ const apiVerifyCard = async (card) => {
   } catch { return null; }
 };
 
+
+// Save story to card permanently
+const apiSaveStory = async (cardId, story) => {
+  try {
+    await apiPut(cardId, { story });
+  } catch(e) { console.error("Story save failed:", e); }
+};
+
 // Context
 const Ctx = createContext(null);
 const useApp = () => useContext(Ctx);
@@ -557,88 +565,99 @@ function EditScreen() {
   </div>;
 }
 
-// ─── Daily Card — Image-First, Pinterest Style ────────────
+// ─── Daily Card — Image First + Persistent Story ──────────
 function DailyCardFull({ card, players }) {
-  const { nav } = useApp();
-  const [story, setStory] = useState(null);
+  const { nav, updCard } = useApp();
+  const [story, setStory] = useState(card.story || null);
   const [loadingStory, setLoadingStory] = useState(false);
-  const [showStory, setShowStory] = useState(false);
 
-  const loadStory = async () => {
-    if (!showStory) {
-      setShowStory(true);
-      if (!story) {
-        setLoadingStory(true);
-        const r = await apiCardStory(card);
-        setStory(r.success ? r.story : "暂时无法加载故事。");
+  // Auto-load story if not saved yet
+  useEffect(() => {
+    if (!card.story && card.id) {
+      setLoadingStory(true);
+      apiCardStory(card).then(r => {
+        if (r.success) {
+          setStory(r.story);
+          // Persist to DB
+          apiSaveStory(card.id, r.story);
+        }
         setLoadingStory(false);
-      }
-    } else {
-      setShowStory(false);
+      });
     }
-  };
+  }, [card.id]);
 
   const hasPhoto = !!card.front_image;
   const grad = cGrad(card.player, players);
 
   return (
-    <div style={{ borderRadius:24, overflow:"hidden", background:T.s2, cursor:"pointer", boxShadow:"0 2px 20px rgba(0,0,0,0.5)" }}
+    <div style={{ borderRadius:20, overflow:"hidden", background:T.s2, boxShadow:"0 2px 24px rgba(0,0,0,0.5)", cursor:"pointer" }}
       onClick={()=>nav("detail", card)}>
 
-      {/* Hero image — full width, tall */}
-      <div style={{ width:"100%", height:"min(calc(100vw * 4/3), 400px)", maxHeight:400, background:hasPhoto?"#000":grad, position:"relative", overflow:"hidden" }}>
-        {hasPhoto
-          ? <img src={card.front_image} alt={card.player}
-              style={{ width:"100%", height:"100%", objectFit:"contain", display:"block" }} />
-          : <div style={{ width:"100%", height:"100%", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:12 }}>
-              <span style={{ fontSize:80 }}>{pEmoji(card.player, players)}</span>
-              <span style={{ fontSize:15, color:"rgba(255,255,255,0.5)", fontWeight:500 }}>{card.player}</span>
-            </div>
-        }
-        {/* Gradient overlay at bottom */}
-        <div style={{ position:"absolute", bottom:0, left:0, right:0, height:"50%", background:"linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 100%)", pointerEvents:"none" }} />
-        {/* Info overlay */}
-        <div style={{ position:"absolute", bottom:0, left:0, right:0, padding:"20px 20px 16px" }}>
-          <div style={{ fontSize:11, color:"rgba(255,255,255,0.55)", marginBottom:4, fontWeight:500 }}>
-            {card.year} · {card.series}
-          </div>
-          <div style={{ fontSize:22, fontWeight:700, color:"#fff", lineHeight:1.2, marginBottom:10 }}>
-            {card.player}
-          </div>
-          <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-            {card.numbered && <span style={{ padding:"3px 10px", borderRadius:20, background:"rgba(200,168,75,0.9)", color:"#000", fontSize:11, fontWeight:700 }}>{card.numbered}</span>}
-            {card.is_one_of_one && <span style={{ padding:"3px 10px", borderRadius:20, background:"rgba(255,215,0,0.9)", color:"#000", fontSize:11, fontWeight:700 }}>1 OF 1</span>}
-            {card.is_rc && <span style={{ padding:"3px 10px", borderRadius:20, background:"rgba(48,209,88,0.85)", color:"#000", fontSize:11, fontWeight:700 }}>RC</span>}
-            <span style={{ padding:"3px 10px", borderRadius:20, background:"rgba(255,255,255,0.15)", color:"#fff", fontSize:11, backdropFilter:"blur(8px)" }}>{STATUS[card.status]?.label||"持有"}</span>
-          </div>
-        </div>
-      </div>
+      {/* Two-column layout: card image left, story right */}
+      <div style={{ display:"flex", gap:0 }}>
 
-      {/* Card meta row */}
-      <div style={{ padding:"14px 16px 4px", display:"flex", justifyContent:"space-between", alignItems:"center" }}
-        onClick={e=>{e.stopPropagation();}}>
-        <div>
-          <div style={{ fontSize:13, color:T.muted, fontWeight:400 }}>{card.parallel || "Base"}</div>
-        </div>
-        <button
-          onClick={e=>{ e.stopPropagation(); loadStory(); }}
-          style={{ background:"none", border:"none", color:T.gold, fontSize:12, cursor:"pointer", padding:"4px 0", display:"flex", alignItems:"center", gap:4, fontWeight:500 }}>
-          {showStory ? "收起 ↑" : "📖 故事"}
-        </button>
-      </div>
-
-      {/* Story */}
-      {showStory && (
-        <div style={{ padding:"0 16px 16px", animation:"fadeUp 0.3s ease both" }}>
-          {loadingStory
-            ? <div style={{ fontSize:12, color:T.muted, padding:"8px 0" }}>
-                <span style={{ animation:"pulse 1s ease infinite" }}>✨ </span>
-                {card.back_image ? "读取卡背故事..." : "生成球员故事..."}
+        {/* Left: Card image */}
+        <div style={{ width:"45%", flexShrink:0, position:"relative", background:hasPhoto?"#000":grad, minHeight:280, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden" }}>
+          {hasPhoto
+            ? <img src={card.front_image} alt={card.player} style={{ width:"100%", height:"100%", objectFit:"contain", display:"block" }} />
+            : <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:16, gap:8 }}>
+                <span style={{ fontSize:56 }}>{pEmoji(card.player, players)}</span>
+                <span style={{ fontSize:11, color:"rgba(255,255,255,0.4)", textAlign:"center", fontWeight:500 }}>{card.player}</span>
               </div>
-            : <p style={{ fontSize:13, color:T.muted, lineHeight:1.8, margin:0 }}>{story}</p>
           }
+          {/* Bottom gradient */}
+          <div style={{ position:"absolute", bottom:0, left:0, right:0, height:"40%", background:"linear-gradient(to top, rgba(0,0,0,0.7), transparent)", pointerEvents:"none" }} />
+          {/* Badges */}
+          <div style={{ position:"absolute", bottom:10, left:10, display:"flex", flexDirection:"column", gap:4 }}>
+            {card.numbered && <span style={{ padding:"2px 8px", borderRadius:20, background:"rgba(200,168,75,0.9)", color:"#000", fontSize:10, fontWeight:700 }}>{card.numbered}</span>}
+            {card.is_one_of_one && <span style={{ padding:"2px 8px", borderRadius:20, background:"rgba(255,215,0,0.9)", color:"#000", fontSize:10, fontWeight:700 }}>1/1</span>}
+            {card.is_rc && <span style={{ padding:"2px 8px", borderRadius:20, background:"rgba(48,209,88,0.85)", color:"#000", fontSize:10, fontWeight:700 }}>RC</span>}
+          </div>
         </div>
-      )}
+
+        {/* Right: Info + Story */}
+        <div style={{ flex:1, display:"flex", flexDirection:"column", padding:"16px 14px", minWidth:0, overflow:"hidden" }}>
+          {/* Player + series */}
+          <div style={{ marginBottom:10 }}>
+            <div style={{ fontSize:11, color:T.gold, fontWeight:600, marginBottom:4, letterSpacing:0.3 }}>
+              {players?.find(p=>p.name===card.player)?.emoji} {players?.find(p=>p.name===card.player)?.short || card.player.split(" ").pop()}
+            </div>
+            <div style={{ fontSize:14, fontWeight:700, color:T.text, lineHeight:1.3, marginBottom:3 }}>
+              {card.parallel || card.series}
+            </div>
+            <div style={{ fontSize:11, color:T.muted, lineHeight:1.4 }}>
+              {card.year}{card.sub_series ? ` · ${card.sub_series}` : ""}
+            </div>
+          </div>
+
+          {/* Status chip */}
+          <div style={{ marginBottom:12 }}>
+            <span style={{ fontSize:10, color:STATUS[card.status]?.color||T.green, background:STATUS[card.status]?.bg, padding:"3px 8px", borderRadius:20, fontWeight:600 }}>
+              {STATUS[card.status]?.label||"持有"}
+            </span>
+            {card.grade && card.grade !== "RAW" && <span style={{ fontSize:10, color:"#FFD700", background:"rgba(255,215,0,0.1)", padding:"3px 8px", borderRadius:20, fontWeight:600, marginLeft:4 }}>{card.grade}</span>}
+          </div>
+
+          {/* Divider */}
+          <div style={{ height:1, background:T.border, marginBottom:10 }} />
+
+          {/* Story */}
+          <div style={{ flex:1, overflow:"hidden" }}>
+            {loadingStory ? (
+              <div style={{ display:"flex", alignItems:"center", gap:6, fontSize:11, color:T.dim }}>
+                <span style={{ animation:"pulse 1s ease infinite" }}>✨</span>
+                <span>生成故事中...</span>
+              </div>
+            ) : story ? (
+              <p style={{ fontSize:11, color:T.muted, lineHeight:1.75, margin:0, display:"-webkit-box", WebkitLineClamp:7, WebkitBoxOrient:"vertical", overflow:"hidden" }}>
+                {story}
+              </p>
+            ) : (
+              <p style={{ fontSize:11, color:T.dim, lineHeight:1.6, margin:0 }}>暂无故事</p>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
