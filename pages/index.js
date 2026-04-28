@@ -182,12 +182,17 @@ const apiSaveStory = async (cardId, story) => {
 
 const apiRadar = async (cards, pcPlayers) => {
   try {
-    // Strip image data before sending — only need text fields
-    const lightCards = cards.map(({ front_image, back_image, story, ...rest }) => rest);
+    // Only send minimal fields needed for analysis
+    const lightCards = cards.map(c => ({
+      player: c.player, year: c.year, series: c.series,
+      parallel: c.parallel, numbered: c.numbered,
+      grade: c.grade, category: c.category, status: c.status,
+    }));
+    const lightPlayers = pcPlayers.map(p => ({ name: p.name, short: p.short }));
     const r = await fetch("/api/radar", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cards: lightCards, pcPlayers }),
+      body: JSON.stringify({ cards: lightCards, pcPlayers: lightPlayers }),
     });
     const d = await r.json();
     if (!r.ok) return { success: false, error: d.error };
