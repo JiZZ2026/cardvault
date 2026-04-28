@@ -193,6 +193,23 @@ const apiRadar = async (cards, pcPlayers) => {
   } catch(e) { return { success: false, error: e.message }; }
 };
 
+
+const apiEbayPrice = async (card, customQuery) => {
+  try {
+    const r = await fetch("/api/ebay-price", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        player: card.player, year: card.year, series: card.series,
+        parallel: card.parallel, numbered: card.numbered,
+        grade: card.grade, customQuery,
+      }),
+    });
+    const d = await r.json();
+    if (!r.ok) return { success: false, error: d.error };
+    return d;
+  } catch(e) { return { success: false, error: e.message }; }
+};
 // Context
 const Ctx = createContext(null);
 const useApp = () => useContext(Ctx);
@@ -387,6 +404,564 @@ function buildTags(form) {
 }
 
 
+// ─── Verification Panel ───────────────────────────────────
+function VerificationBanner({ result, onApplySuggestion }) {
+  if (!result) return null;
+
+  const issues = [];
+  if (result.parallelValid === false) issues.push("parallel");
+  if (result.seriesValid === false) issues.push("series");
+  if (result.numberedValid === false) issues.push("numbered");
+
+  if (issues.length === 0 && result.confidence !== "low") {
+    return (
+      <div style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 14px", borderRadius:10, background:"rgba(61,170,106,0.08)", border:"1px solid rgba(61,170,106,0.2)", marginBottom:14 }}>
+        <span style={{ fontSize:14 }}>✅</span>
+        <span style={{ fontSize:12, color:T.green }}>卡片信息已验证，与官方 checklist 一致</span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding:"12px 14px", borderRadius:10, background:"rgba(224,120,48,0.08)", border:"1px solid rgba(224,120,48,0.25)", marginBottom:14 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:8 }}>
+        <span style={{ fontSize:14 }}>⚠️</span>
+        <span style={{ fontSize:12, color:T.orange, fontWeight:700 }}>识别信息需要确认</span>
+      </div>
+      {result.notes && <p style={{ fontSize:12, color:T.muted, lineHeight:1.7, marginBottom:result.parallelSuggestions?.length?10:0 }}>{result.notes}</p>}
+      {result.parallelValid === false && result.parallelSuggestions?.length > 0 && (
+        <div>
+          <div style={{ fontSize:11, color:T.dim, marginBottom:6, fontFamily:"'Space Mono',monospace" }}>该系列实际存在的平行类型：</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+            {result.parallelSuggestions.map((s, i) => (
+              <button key={i} onClick={() => onApplySuggestion("parallel", s)} style={{
+                padding:"5px 12px", borderRadius:8, border:`1px solid ${T.borderGold}`,
+                background:`rgba(201,168,76,0.1)`, color:T.gold, fontSize:11, cursor:"pointer",
+              }}>
+                {s} ✓
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PhotoBox({label,image,onCapture}) {
+  const ref=useRef();
+  const handle=async e=>{ const f=e.target.files?.[0]; if(!f)return; onCapture(await toB64(f)); };
+  return <div onClick={()=>ref.current?.click()} style={{width:145,height:200,borderRadius:14,cursor:"pointer",background:image?"#0a0a14":T.s2,border:`2px dashed ${image?T.borderGold:T.border}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden",position:"relative",transition:"all 0.2s"}}>
+    <input ref={ref} type="file" accept="image/*" onChange={handle} style={{display:"none"}} />
+    {image?(<><img src={image} alt="" style={{width:"100%",height:"100%",objectFit:"contain"}} /><div style={{position:"absolute",top:8,right:8,padding:"3px 8px",background:"rgba(61,170,106,0.9)",borderRadius:6,fontFamily:"'Space Mono',monospace",fontSize:10,color:"#fff",fontWeight:700}}>✓</div></>):
+    (<><div style={{fontSize:32,marginBottom:8}}>📷</div><div style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.dim,fontWeight:700}}>{label}</div><div style={{fontSize:10,color:T.dim,marginTop:4}}>点击拍摄</div></>)}
+  </div>;
+}
+function AnimF({fields}) {
+  const [n,setN]=useState(0);
+  useEffect(()=>{ if(n<fields.length){const t=setTimeout(()=>setN(x=>x+1),200);return()=>clearTimeout(t);} },[n,fields.length]);
+  return <div>{fields.slice(0,n).map((f,i)=><div key={i} style={{display:"flex",gap:8,padding:"4px 0",animation:"fadeUp 0.2s ease both",fontFamily:"'Space Mono',monospace",fontSize:12}}><span style={{color:T.green}}>✓</span><span style={{color:T.muted}}>{f.l}：</span><span style={{color:T.text,fontWeight:700}}>{f.v}</span></div>)}{n<fields.length&&<div style={{display:"flex",gap:6,padding:"4px 0",fontFamily:"'Space Mono',monospace",fontSize:12,color:T.dim}}><span style={{animation:"pulse 0.8s ease infinite"}}>◆</span><span>提取中...</span></div>}</div>;
+}
+function StepBar({cur}) {
+  return <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:24}}>{[["1","拍照"],["2","识别"],["3","入库"]].map(([n,l],i)=>{
+    const done=i<cur,act=i===cur;
+    return <div key={n} style={{display:"flex",alignItems:"center",gap:6}}>
+      <div style={{width:26,height:26,borderRadius:"50%",background:act?"linear-gradient(135deg,#C9A84C,#8B6914)":done?"rgba(61,170,106,0.2)":T.s2,border:`1px solid ${act?T.borderGold:done?"rgba(61,170,106,0.4)":T.border}`,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Space Mono',monospace",fontSize:10,fontWeight:700,color:act?"#000":done?T.green:T.dim}}>{done?"✓":n}</div>
+      <span style={{fontSize:11,color:act?T.gold:T.dim}}>{l}</span>
+      {i<2&&<div style={{width:16,height:1,background:T.border}} />}
+    </div>;
+  })}</div>;
+}
+
+function AddScreen() {
+  const {addCard,nav,pcP}=useApp();
+  const [step,setStep]=useState("photo");
+  const [front,setFront]=useState(null); const [back,setBack]=useState(null);
+  const [anim,setAnim]=useState([]); const [rec,setRec]=useState(null);
+  const [err,setErr]=useState(null); const [form,setForm]=useState(EMPTY());
+  const [saving,setSaving]=useState(false); const [tab,setTab]=useState("card");
+  const [verifyResult,setVerifyResult]=useState(null);
+  const set=k=>v=>setForm(f=>({...f,[k]:v}));
+
+  const recognize=async()=>{
+    if(!front&&!back)return;
+    setStep("recognizing"); setErr(null); setAnim([]); setVerifyResult(null);
+    try {
+      const [cf,cb]=await Promise.all([front?compressImg(front,1400,0.88):null,back?compressImg(back,1400,0.88):null]);
+      const r=await apiRecognize(cf,cb);
+      if(r.success){
+        const d=r.data;
+        const f=[d.player&&{l:"球星",v:d.player},d.team&&{l:"球队",v:d.team},d.year&&{l:"赛季",v:d.year},d.series&&{l:"系列",v:d.series},d.cardNumber&&{l:"卡号",v:d.cardNumber},d.parallel&&{l:"平行",v:d.parallel},d.numbered&&{l:"编号",v:d.numbered},d.isOneOfOne&&{l:"稀有",v:"1 OF 1 🔥"},d.isRC&&{l:"身份",v:"RC 新秀"},d.subSeries&&{l:"子系列",v:d.subSeries},(d.grade&&d.grade!=="RAW")&&{l:"评级",v:d.grade}].filter(Boolean);
+        setAnim(f); setRec(d);
+        const isPC=pcP.some(p=>p.name===d.player);
+        setForm({...EMPTY(),player:d.player||"",team:d.team||"",year:d.year||"",series:d.series||"",manufacturer:d.manufacturer||"",card_number:d.cardNumber||"",parallel:d.parallel||"",numbered:d.numbered||"",is_one_of_one:d.isOneOfOne||false,sub_series:d.subSeries||"",is_rc:d.isRC||false,grade:d.grade||"RAW",grade_company:d.gradeCompany||"",grade_score:d.gradeScore||"",category:isPC?"PC":"investment",status:"holding",buy_date:new Date().toISOString().slice(0,10)});
+        setTimeout(()=>setStep("confirm"),f.length*200+600);
+      } else { setErr(r.error); setStep("photo"); }
+    } catch(e){ setErr(e?.message||"识别失败"); setStep("photo"); }
+  };
+
+  const save=async()=>{
+    if(!form.player)return; setSaving(true);
+    const tags=buildTags(form);
+    const [tf,tb]=await Promise.all([front?mkThumb(front):null,back?mkThumb(back):null]);
+    const status=form.sell_price?"sold":form.status;
+    await addCard({...form,buy_price:form.buy_price?parseFloat(form.buy_price):null,sell_price:form.sell_price?parseFloat(form.sell_price):null,is_one_of_one:!!form.is_one_of_one,is_rc:!!form.is_rc,numbered:form.numbered||null,sub_series:form.sub_series||null,grade_company:form.grade_company||null,grade_score:form.grade_score||null,pc_player:form.category==="PC"?form.player:null,front_image:tf,back_image:tb,tags,notes:form.notes||"",status});
+    setSaving(false); nav("home");
+  };
+
+  if(step==="photo") return <div style={{paddingBottom:90}}>
+    <div style={{padding:"16px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:`1px solid ${T.border}`}}>
+      <button onClick={()=>nav("home")} style={{background:"none",border:"none",color:T.muted,fontSize:20}}>←</button>
+      <span style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.dim,letterSpacing:1}}>录入新卡</span>
+      <button onClick={()=>setStep("confirm")} style={{background:"none",border:"none",color:T.dim,fontSize:11}}>跳过</button>
+    </div>
+    <div style={{padding:"24px 20px"}}>
+      <StepBar cur={0} />
+      <div style={{fontFamily:"'Inter',sans-serif",fontSize:18,color:T.text,marginBottom:6}}>拍摄卡片正反面</div>
+      <p style={{fontSize:12,color:T.muted,lineHeight:1.7,marginBottom:24}}>拍完正反面，AI 自动识别全部信息，确认后一键入库。</p>
+      <div style={{display:"flex",gap:16,justifyContent:"center",marginBottom:24}}>
+        <div style={{textAlign:"center"}}><PhotoBox label="正面" image={front} onCapture={setFront} /><div style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,marginTop:8}}>FRONT</div></div>
+        <div style={{textAlign:"center"}}><PhotoBox label="背面" image={back} onCapture={setBack} /><div style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,marginTop:8}}>BACK</div></div>
+      </div>
+      {err&&<div style={{padding:"10px 14px",borderRadius:8,background:"rgba(212,80,80,0.08)",border:"1px solid rgba(212,80,80,0.2)",marginBottom:14,fontSize:12,color:T.red}}>⚠️ {err}</div>}
+      <div style={{padding:"10px 14px",borderRadius:10,background:"rgba(201,168,76,0.06)",border:`1px solid ${T.borderGold}`,marginBottom:16,fontSize:11,color:T.muted,lineHeight:1.7}}>💡 <strong style={{color:T.gold}}>拍摄建议：</strong>卡背文字清晰识别率更高。</div>
+      <button onClick={recognize} disabled={!front&&!back} style={{width:"100%",padding:"14px",borderRadius:14,border:"none",background:(front||back)?`linear-gradient(135deg,${T.gold},${T.goldDark})`:T.s3,color:(front||back)?"#000":T.dim,fontSize:15,fontWeight:700,boxShadow:(front||back)?`0 4px 20px rgba(201,168,76,0.25)`:"none",transition:"all 0.2s",marginBottom:12}}>
+        {(front||back)?"🧠 AI识别卡片信息":"请先拍摄至少一张照片"}
+      </button>
+      <button onClick={()=>setStep("confirm")} style={{width:"100%",padding:"10px",borderRadius:12,border:`1px solid ${T.border}`,background:"transparent",color:T.dim,fontSize:13}}>跳过，手动填写 →</button>
+    </div>
+  </div>;
+
+  if(step==="recognizing") return <div style={{paddingBottom:90}}>
+    <div style={{padding:"16px 20px",borderBottom:`1px solid ${T.border}`}}><span style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.dim,letterSpacing:1}}>AI识别中...</span></div>
+    <div style={{padding:"24px 20px"}}>
+      <StepBar cur={1} />
+      <div style={{display:"flex",gap:12,marginBottom:20}}>
+        {[front,back].filter(Boolean).map((img,i)=><div key={i} style={{width:72,height:101,borderRadius:9,overflow:"hidden",border:`1px solid ${T.border}`}}><img src={img} alt="" style={{width:"100%",height:"100%",objectFit:"contain",background:"#0a0a14"}} /></div>)}
+        <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"center",gap:8}}>
+          <div style={{fontFamily:"'Inter',sans-serif",fontSize:15,color:T.text}}>正在识别卡片信息</div>
+          <div style={{display:"flex",gap:5}}>{[0,1,2].map(i=><div key={i} style={{width:6,height:6,borderRadius:"50%",background:T.gold,animation:`pulse 1s ease ${i*200}ms infinite`}} />)}</div>
+        </div>
+      </div>
+      <div style={{background:T.s2,border:`1px solid ${T.border}`,borderRadius:14,padding:"14px 18px"}}>
+        <div style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,letterSpacing:1,marginBottom:12}}>EXTRACTING CARD DATA</div>
+        <AnimF fields={anim} />
+      </div>
+    </div>
+  </div>;
+
+  return <div style={{paddingBottom:90}}>
+    <div style={{padding:"16px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,background:T.bg,zIndex:10,borderBottom:`1px solid ${T.border}`}}>
+      <button onClick={()=>setStep("photo")} style={{background:"none",border:"none",color:T.muted,fontSize:20}}>←</button>
+      <span style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.dim}}>{rec?"确认识别信息":"手动录入"}</span>
+      <button onClick={save} disabled={saving||!form.player} style={{padding:"7px 16px",borderRadius:8,border:"none",background:form.player?`linear-gradient(135deg,${T.gold},${T.goldDark})`:T.border,color:form.player?"#000":T.dim,fontSize:12,fontWeight:700}}>{saving?"保存...":"✓ 入库"}</button>
+    </div>
+    <div style={{padding:"16px 20px"}}>
+      {(front||back)&&<div style={{display:"flex",gap:10,marginBottom:16,alignItems:"flex-start"}}>
+        {[{img:front,l:"正面"},{img:back,l:"背面"}].filter(x=>x.img).map(({img,l},i)=>(
+          <div key={i}><div style={{width:72,height:101,borderRadius:9,overflow:"hidden",border:`1px solid ${T.borderGold}`,background:"#0a0a14"}}><img src={img} alt="" style={{width:"100%",height:"100%",objectFit:"contain"}} /></div><div style={{fontFamily:"'Space Mono',monospace",fontSize:9,color:T.dim,textAlign:"center",marginTop:3}}>{l}</div></div>
+        ))}
+        {rec&&<Chip label={rec.confidence==="high"?"识别准确":rec.confidence==="medium"?"需确认":"请核对"} color={rec.confidence==="high"?T.green:rec.confidence==="medium"?T.orange:T.red} style={{alignSelf:"flex-start",marginTop:4,fontSize:10,padding:"4px 10px"}} />}
+      </div>}
+      <VerificationBanner result={verifyResult} onApplySuggestion={(field, value) => set(field)(value)} />
+      <CardFormFields form={form} set={set} tab={tab} setTab={setTab} />
+      <button onClick={save} disabled={saving||!form.player} style={{width:"100%",padding:"14px",borderRadius:14,border:"none",marginTop:8,background:form.player?`linear-gradient(135deg,${T.gold},${T.goldDark})`:T.s3,color:form.player?"#000":T.dim,fontSize:15,fontWeight:700,boxShadow:form.player?`0 4px 20px rgba(201,168,76,0.25)`:"none"}}>
+        {saving?"保存中...":"✓ 确认入库"}
+      </button>
+    </div>
+  </div>;
+}
+
+function EditScreen() {
+  const {sel:card,updCard,delCard,nav}=useApp();
+  const [front,setFront]=useState(card?.front_image||null);
+  const [back,setBack]=useState(card?.back_image||null);
+  const [form,setForm]=useState(()=>card?{...EMPTY(),player:card.player||"",team:card.team||"",year:card.year||"",series:card.series||"",manufacturer:card.manufacturer||"",card_number:card.card_number||"",parallel:card.parallel||"",numbered:card.numbered||"",is_one_of_one:card.is_one_of_one||false,sub_series:card.sub_series||"",is_rc:card.is_rc||false,grade:card.grade||"RAW",grade_company:card.grade_company||"",grade_score:card.grade_score||"",category:card.category||"PC",status:card.status||"holding",price_currency:card.price_currency||"RMB",buy_price:card.buy_price||"",buy_date:card.buy_date||"",sell_price:card.sell_price||"",sell_date:card.sell_date||"",source:card.source||"",location:card.location||"",notes:card.notes||"",tags:Array.isArray(card.tags)?card.tags.join(", "):(card.tags||"")}:EMPTY());
+  const [saving,setSaving]=useState(false); const [tab,setTab]=useState("card");
+  const [verifyResult,setVerifyResult]=useState(null);
+  if(!card){nav("home");return null;}
+  const set=k=>v=>setForm(f=>({...f,[k]:v}));
+
+  const save=async()=>{
+    if(!form.player)return; setSaving(true);
+    const tags=buildTags(form);
+    let tf=front, tb=back;
+    if(front&&front!==card.front_image)tf=await mkThumb(front);
+    if(back&&back!==card.back_image)tb=await mkThumb(back);
+    const status=form.sell_price?"sold":form.status;
+    const updated=await updCard(card.id,{...form,buy_price:form.buy_price?parseFloat(form.buy_price):null,sell_price:form.sell_price?parseFloat(form.sell_price):null,is_one_of_one:!!form.is_one_of_one,is_rc:!!form.is_rc,numbered:form.numbered||null,sub_series:form.sub_series||null,grade_company:form.grade_company||null,grade_score:form.grade_score||null,front_image:tf,back_image:tb,tags,notes:form.notes||"",status});
+    setSaving(false);
+    if(updated)nav("detail",updated); else nav("home");
+  };
+
+  return <div style={{paddingBottom:90}}>
+    <div style={{padding:"16px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,background:T.bg,zIndex:10,borderBottom:`1px solid ${T.border}`}}>
+      <button onClick={()=>nav("detail",card)} style={{background:"none",border:"none",color:T.muted,fontSize:20}}>←</button>
+      <span style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.dim}}>编辑卡片</span>
+      <button onClick={save} disabled={saving||!form.player} style={{padding:"7px 16px",borderRadius:8,border:"none",background:form.player?`linear-gradient(135deg,${T.gold},${T.goldDark})`:T.border,color:form.player?"#000":T.dim,fontSize:12,fontWeight:700}}>{saving?"保存...":"✓ 保存"}</button>
+    </div>
+    <div style={{padding:"16px 20px"}}>
+      <div style={{marginBottom:20}}>
+        <div style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,letterSpacing:1,marginBottom:10}}>照片（点击更换）</div>
+        <div style={{display:"flex",gap:16}}>
+          <div style={{textAlign:"center"}}><PhotoBox label="正面" image={front} onCapture={setFront} /><div style={{fontFamily:"'Space Mono',monospace",fontSize:9,color:T.dim,marginTop:6}}>FRONT</div></div>
+          <div style={{textAlign:"center"}}><PhotoBox label="背面" image={back} onCapture={setBack} /><div style={{fontFamily:"'Space Mono',monospace",fontSize:9,color:T.dim,marginTop:6}}>BACK</div></div>
+        </div>
+      </div>
+      <CardFormFields form={form} set={set} tab={tab} setTab={setTab} />
+      <button onClick={save} disabled={saving||!form.player} style={{width:"100%",padding:"14px",borderRadius:14,border:"none",marginTop:8,background:form.player?`linear-gradient(135deg,${T.gold},${T.goldDark})`:T.s3,color:form.player?"#000":T.dim,fontSize:15,fontWeight:700,boxShadow:form.player?`0 4px 20px rgba(201,168,76,0.25)`:"none"}}>{saving?"保存中...":"✓ 保存修改"}</button>
+      <button onClick={()=>{if(window.confirm("确认删除这张卡？")){delCard(card.id);nav("home");}}} style={{width:"100%",padding:"12px",borderRadius:12,border:`1px solid rgba(212,80,80,0.2)`,background:"rgba(212,80,80,0.06)",color:T.red,fontSize:13,marginTop:10}}>删除此卡</button>
+    </div>
+  </div>;
+}
+
+// ─── Daily Card — Image First + Persistent Story ──────────
+function DailyCardFull({ card, players }) {
+  const { nav, updCard } = useApp();
+  const [story, setStory] = useState(card.story || null);
+  const [loadingStory, setLoadingStory] = useState(false);
+
+  // Auto-load story if not saved yet
+  useEffect(() => {
+    if (!card.story && card.id) {
+      setLoadingStory(true);
+      apiCardStory(card).then(r => {
+        if (r.success) {
+          setStory(r.story);
+          // Persist to DB
+          apiSaveStory(card.id, r.story);
+        }
+        setLoadingStory(false);
+      });
+    }
+  }, [card.id]);
+
+  const hasPhoto = !!card.front_image;
+  const grad = cGrad(card.player, players);
+
+  return (
+    <div style={{ borderRadius:20, overflow:"hidden", background:T.s2, boxShadow:"0 2px 24px rgba(0,0,0,0.5)", cursor:"pointer" }}
+      onClick={()=>nav("detail", card)}>
+
+      {/* Two-column layout: card image left, story right */}
+      <div style={{ display:"flex", gap:0 }}>
+
+        {/* Left: Card image */}
+        <div style={{ width:"45%", flexShrink:0, position:"relative", background:hasPhoto?"#000":grad, minHeight:280, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden" }}>
+          {hasPhoto
+            ? <img src={card.front_image} alt={card.player} style={{ width:"100%", height:"100%", objectFit:"contain", display:"block" }} />
+            : <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:16, gap:8 }}>
+                <span style={{ fontSize:56 }}>{pEmoji(card.player, players)}</span>
+                <span style={{ fontSize:11, color:"rgba(255,255,255,0.4)", textAlign:"center", fontWeight:500 }}>{card.player}</span>
+              </div>
+          }
+          {/* Bottom gradient */}
+          <div style={{ position:"absolute", bottom:0, left:0, right:0, height:"40%", background:"linear-gradient(to top, rgba(0,0,0,0.7), transparent)", pointerEvents:"none" }} />
+          {/* Badges */}
+          <div style={{ position:"absolute", bottom:10, left:10, display:"flex", flexDirection:"column", gap:4 }}>
+            {card.numbered && <span style={{ padding:"2px 8px", borderRadius:20, background:"rgba(200,168,75,0.9)", color:"#000", fontSize:10, fontWeight:700 }}>{card.numbered}</span>}
+            {card.is_one_of_one && <span style={{ padding:"2px 8px", borderRadius:20, background:"rgba(255,215,0,0.9)", color:"#000", fontSize:10, fontWeight:700 }}>1/1</span>}
+            {card.is_rc && <span style={{ padding:"2px 8px", borderRadius:20, background:"rgba(48,209,88,0.85)", color:"#000", fontSize:10, fontWeight:700 }}>RC</span>}
+          </div>
+        </div>
+
+        {/* Right: Info + Story */}
+        <div style={{ flex:1, display:"flex", flexDirection:"column", padding:"16px 14px", minWidth:0, overflow:"hidden" }}>
+          {/* Player + series */}
+          <div style={{ marginBottom:10 }}>
+            <div style={{ fontSize:11, color:T.gold, fontWeight:600, marginBottom:4, letterSpacing:0.3 }}>
+              {players?.find(p=>p.name===card.player)?.emoji} {players?.find(p=>p.name===card.player)?.short || card.player.split(" ").pop()}
+            </div>
+            <div style={{ fontSize:14, fontWeight:700, color:T.text, lineHeight:1.3, marginBottom:3 }}>
+              {card.parallel || card.series}
+            </div>
+            <div style={{ fontSize:11, color:T.muted, lineHeight:1.4 }}>
+              {card.year}{card.sub_series ? ` · ${card.sub_series}` : ""}
+            </div>
+          </div>
+
+          {/* Status chip */}
+          <div style={{ marginBottom:12 }}>
+            <span style={{ fontSize:10, color:STATUS[card.status]?.color||T.green, background:STATUS[card.status]?.bg, padding:"3px 8px", borderRadius:20, fontWeight:600 }}>
+              {STATUS[card.status]?.label||"持有"}
+            </span>
+            {card.grade && card.grade !== "RAW" && <span style={{ fontSize:10, color:"#FFD700", background:"rgba(255,215,0,0.1)", padding:"3px 8px", borderRadius:20, fontWeight:600, marginLeft:4 }}>{card.grade}</span>}
+          </div>
+
+          {/* Divider */}
+          <div style={{ height:1, background:T.border, marginBottom:10 }} />
+
+          {/* Story */}
+          <div style={{ flex:1, overflow:"hidden", position:"relative" }}>
+            {loadingStory ? (
+              <div style={{ display:"flex", alignItems:"center", gap:6, fontSize:11, color:T.dim }}>
+                <span style={{ animation:"pulse 1s ease infinite" }}>✨</span>
+                <span>生成故事中...</span>
+              </div>
+            ) : story ? (
+              <div
+                onClick={e=>e.stopPropagation()}
+                style={{ maxHeight:140, overflowY:"auto", scrollbarWidth:"none", msOverflowStyle:"none" }}
+              >
+                <style>{".story-scroll::-webkit-scrollbar{display:none}"}</style>
+                <p className="story-scroll" style={{ fontSize:11, color:T.muted, lineHeight:1.75, margin:0 }}>
+                  {story}
+                </p>
+              </div>
+            ) : (
+              <p style={{ fontSize:11, color:T.dim, lineHeight:1.6, margin:0 }}>暂无故事</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HomeScreen() {
+  const {cards,pcP,stats,loading,daily,nav,refreshDaily,dc,toggleDC,rate}=useApp();
+  if(loading) return (
+    <div style={{padding:"20px"}}>
+      <Skel height={24} width={140} style={{marginBottom:6}} />
+      <Skel height={12} width={100} style={{marginBottom:28}} />
+      <Skel height={320} radius={20} style={{marginBottom:20}} />
+      <Skel height={100} radius={16} style={{marginBottom:16}} />
+      <Skel height={160} radius={14} />
+    </div>
+  );
+  return (
+    <div style={{paddingBottom:90}}>
+
+      {/* Header */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"20px 20px 12px"}}>
+        <div>
+          <h1 style={{fontSize:26,fontWeight:700,color:T.text,letterSpacing:"-0.5px",lineHeight:1.1,fontFamily:"'Inter',sans-serif"}}>Card Vault</h1>
+          <p style={{fontSize:12,color:T.muted,marginTop:3}}>{new Date().toLocaleDateString("zh-CN",{month:"long",day:"numeric",weekday:"short"})}</p>
+        </div>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <CurrBtn />
+          <button onClick={()=>nav("search")} style={{width:38,height:38,borderRadius:"50%",border:"none",background:T.s2,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,cursor:"pointer",flexShrink:0}}>🔍</button>
+          <button onClick={()=>nav("add")} style={{width:38,height:38,borderRadius:"50%",border:"none",background:T.gold,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,cursor:"pointer",flexShrink:0}}>📷</button>
+        </div>
+      </div>
+
+      {/* Daily Featured */}
+      {daily && (
+        <div style={{padding:"0 16px 20px",animation:"fadeUp 0.5s ease both"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,padding:"0 4px"}}>
+            <span style={{fontSize:17,fontWeight:600,color:T.text,letterSpacing:"-0.3px"}}>今日精选</span>
+            <button onClick={e=>{e.stopPropagation();refreshDaily();}} style={{background:"none",border:"none",color:T.gold,fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",gap:4,fontWeight:500,padding:0}}>
+              🔀 换一张
+            </button>
+          </div>
+          <DailyCardFull card={daily} players={pcP} />
+        </div>
+      )}
+
+      {/* Stats Grid */}
+      <div style={{padding:"0 16px 16px",animation:"fadeUp 0.5s ease 80ms both"}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
+          {[
+            {icon:"🃏",v:stats.total,l:"总卡数",go:"search"},
+            {icon:"❤️",v:stats.pc,l:"PC",go:"pc"},
+            {icon:"📈",v:stats.inv,l:"投资",go:"search"},
+            {icon:"💎",v:stats.longhold,l:"长持",go:"search"},
+          ].map((s,i)=>(
+            <div key={i} onClick={()=>nav(s.go)} style={{padding:"14px 6px",borderRadius:16,textAlign:"center",background:T.s2,cursor:"pointer",transition:"background 0.15s"}}
+              onMouseEnter={e=>e.currentTarget.style.background=T.s3}
+              onMouseLeave={e=>e.currentTarget.style.background=T.s2}>
+              <div style={{fontSize:18,marginBottom:6}}>{s.icon}</div>
+              <div style={{fontSize:22,fontWeight:700,color:T.text,letterSpacing:"-0.5px",lineHeight:1}}>{s.v}</div>
+              <div style={{fontSize:10,color:T.muted,marginTop:4}}>{s.l}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Cost */}
+      {(stats.cost!==null&&stats.cost>0) && (
+        <div style={{margin:"0 16px 16px",padding:"14px 16px",borderRadius:16,background:`linear-gradient(135deg,rgba(200,168,75,0.1),rgba(200,168,75,0.04))`,border:`1px solid rgba(200,168,75,0.2)`,animation:"fadeUp 0.5s ease 120ms both"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontSize:13,color:T.muted}}>持仓总成本</span>
+            <span style={{fontSize:18,fontWeight:700,color:T.gold,fontFamily:"monospace"}}>{fmtP(stats.cost,dc,rate)}</span>
+          </div>
+          <div style={{textAlign:"right",marginTop:2}}>
+            <span style={{fontSize:11,color:T.dim}}>≈ {dc==="RMB"?fmtDual(stats.cost,rate).usd:fmtDual(stats.cost,rate).rmb}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Recent */}
+      <div style={{padding:"0 16px",animation:"fadeUp 0.5s ease 160ms both"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <span style={{fontSize:17,fontWeight:600,color:T.text,letterSpacing:"-0.3px"}}>最近入库</span>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <span style={{fontSize:12,color:T.muted}}>{cards.length} 张</span>
+            <button onClick={()=>nav("search")} style={{background:"none",border:"none",color:T.gold,fontSize:13,cursor:"pointer",padding:0,fontWeight:500}}>全部</button>
+          </div>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {cards.slice(0,5).map(c=><CardRow key={c.id} card={c} ps={pcP} onClick={()=>nav("detail",c)} />)}
+          {cards.length===0 && (
+            <div style={{textAlign:"center",padding:"48px 0",color:T.dim}}>
+              <div style={{fontSize:48,marginBottom:12}}>🃏</div>
+              <div style={{fontSize:14}}>还没有卡片，点右上角📷开始录入</div>
+            </div>
+          )}
+        </div>
+      </div>
+
+    </div>
+  );
+}
+
+function SearchScreen() {
+  const {cards,pcP,nav}=useApp();
+  const [q,setQ]=useState(""); const [cf,setCf]=useState("all"); const [pf,setPf]=useState("all"); const [yf,setYf]=useState("all");
+  const ref=useRef(); useEffect(()=>{setTimeout(()=>ref.current?.focus(),100);},[]);
+
+  // Get sorted unique years from cards
+  const years = ["all",...[...new Set(cards.map(c=>c.year).filter(Boolean))].sort((a,b)=>b.localeCompare(a))];
+
+  const list=cards.filter(c=>{
+    if(cf!=="all"&&c.category!==cf)return false;
+    if(pf!=="all"&&c.player!==pf)return false;
+    if(yf!=="all"&&c.year!==yf)return false;
+    if(q){const terms=expandQ(q);const fields=[c.player,c.series,c.parallel,c.card_number,c.numbered,c.grade,c.team,c.sub_series,c.year,...(c.tags||[])].filter(Boolean).map(f=>f.toLowerCase());return terms.some(t=>fields.some(f=>f.includes(t)));}
+    return true;
+  });
+  return <div style={{paddingBottom:90}}>
+    <div style={{padding:"16px 20px 12px",position:"sticky",top:0,background:T.bg,zIndex:10}}>
+      <div style={{position:"relative"}}>
+        <span style={{position:"absolute",left:14,top:"50%",transform:"translateY(-50%)",fontSize:14,color:T.dim,pointerEvents:"none"}}>🔍</span>
+        <input ref={ref} value={q} onChange={e=>setQ(e.target.value)} placeholder="球星、字母哥、勇士、金卡..."
+          style={{width:"100%",padding:"12px 16px 12px 40px",border:`1px solid ${T.border}`,borderRadius:12,background:T.s2,color:T.text,fontSize:14,outline:"none"}}
+          onFocus={e=>e.target.style.borderColor=T.gold} onBlur={e=>e.target.style.borderColor=T.border} />
+      </div>
+      <div style={{display:"flex",gap:8,marginTop:10,overflowX:"auto",scrollbarWidth:"none",paddingBottom:2}}>
+        {[["all","全部"],["PC","PC"],["investment","投资"],["longhold","长持"]].map(([v,l])=>(
+          <button key={v} onClick={()=>setCf(v)} style={{padding:"6px 14px",borderRadius:8,border:`1px solid ${cf===v?T.borderGold:T.border}`,background:cf===v?"rgba(201,168,76,0.1)":"transparent",color:cf===v?T.gold:T.muted,fontSize:12,whiteSpace:"nowrap"}}>{l}</button>
+        ))}
+        <div style={{width:1,background:T.border,margin:"4px 2px"}} />
+        {[["all","全部球星"],...pcP.map(p=>[p.name,`${p.emoji} ${p.short}`])].map(([v,l])=>(
+          <button key={v} onClick={()=>setPf(v)} style={{padding:"6px 14px",borderRadius:8,border:`1px solid ${pf===v?T.borderGold:T.border}`,background:pf===v?"rgba(201,168,76,0.1)":"transparent",color:pf===v?T.gold:T.muted,fontSize:12,whiteSpace:"nowrap"}}>{l}</button>
+        ))}
+      </div>
+      {years.length>2&&<div style={{display:"flex",gap:8,marginTop:6,overflowX:"auto",scrollbarWidth:"none",paddingBottom:4}}>
+        <span style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,alignSelf:"center",flexShrink:0,paddingLeft:4}}>📅</span>
+        {years.map(v=>(
+          <button key={v} onClick={()=>setYf(v)} style={{padding:"5px 12px",borderRadius:8,border:`1px solid ${yf===v?T.borderGold:T.border}`,background:yf===v?"rgba(201,168,76,0.1)":"transparent",color:yf===v?T.gold:T.muted,fontSize:11,whiteSpace:"nowrap",fontFamily:"'Space Mono',monospace"}}>{v==="all"?"全部年份":v}</button>
+        ))}
+      </div>}
+    </div>
+    <div style={{padding:"0 20px"}}>
+      <div style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,marginBottom:12}}>{list.length} 张卡片</div>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        {list.map((c,i)=><CardRow key={c.id} card={c} ps={pcP} onClick={()=>nav("detail",c)} style={{animation:`fadeUp 0.3s ease ${i*40}ms both`}} />)}
+        {list.length===0&&<div style={{textAlign:"center",padding:"48px 0",color:T.dim}}><div style={{fontSize:32,marginBottom:8}}>🔍</div><div style={{fontSize:13}}>没有匹配的卡片</div></div>}
+      </div>
+    </div>
+  </div>;
+}
+
+
+// ─── Market Price Panel (eBay Real Data) ─────────────────
+function MarketPricePanel({ card }) {
+  const { rate } = useApp();
+  const [loading, setLoading] = useState(false);
+  const [result, setResult]   = useState(null);
+  const [err, setErr]         = useState(null);
+  const [editing, setEditing] = useState(false);
+  const [customQ, setCustomQ] = useState("");
+
+  const defaultQ = [
+    card.player?.split(" ").pop(), card.year,
+    card.series?.replace(/Basketball|NBA|Panini/gi,"").trim(),
+    card.parallel, card.numbered,
+    card.grade !== "RAW" ? card.grade : null
+  ].filter(Boolean).join(" ");
+
+  const query = async (useCustom) => {
+    setLoading(true); setErr(null); setResult(null); setEditing(false);
+    const r = await apiEbayPrice(card, useCustom ? customQ : undefined);
+    if (r.success) { setResult(r); if (!customQ) setCustomQ(r.keyword || defaultQ); }
+    else setErr(r.error);
+    setLoading(false);
+  };
+
+  const fmtUSD = n => n ? `$${Number(n).toLocaleString("en-US",{maximumFractionDigits:0})}` : "—";
+  const toRMB  = n => n ? `¥${Math.round(Number(n)*rate).toLocaleString("zh-CN")}` : "—";
+
+  return (
+    <div style={{background:T.s2,border:`1px solid ${T.border}`,borderRadius:14,padding:16,marginBottom:12}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+        <div>
+          <div style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,letterSpacing:1,marginBottom:2}}>EBAY · 真实成交价</div>
+          <div style={{fontSize:12,color:T.muted}}>近期 Sold Listings</div>
+        </div>
+        <button onClick={()=>query(false)} disabled={loading} style={{padding:"8px 16px",borderRadius:10,border:"none",background:loading?T.s3:`linear-gradient(135deg,${T.gold},${T.goldDark})`,color:loading?T.dim:"#000",fontSize:12,fontWeight:700,cursor:loading?"not-allowed":"pointer",flexShrink:0}}>
+          {loading ? <span style={{display:"flex",alignItems:"center",gap:4}}>{[0,1,2].map(i=><span key={i} style={{width:4,height:4,borderRadius:"50%",background:T.dim,display:"inline-block",animation:`pulse 0.8s ease ${i*150}ms infinite`}} />)}</span> : result ? "重新查询" : "🔍 查行情"}
+        </button>
+      </div>
+
+      <div style={{marginBottom:12}}>
+        {editing ? (
+          <div style={{display:"flex",gap:8}}>
+            <input value={customQ||defaultQ} onChange={e=>setCustomQ(e.target.value)}
+              style={{flex:1,padding:"8px 10px",border:`1px solid ${T.borderGold}`,borderRadius:8,background:T.s3,color:T.text,fontSize:12,outline:"none"}} />
+            <button onClick={()=>query(true)} style={{padding:"8px 14px",borderRadius:8,border:"none",background:T.gold,color:"#000",fontSize:12,fontWeight:700,cursor:"pointer"}}>搜索</button>
+            <button onClick={()=>setEditing(false)} style={{padding:"8px 10px",borderRadius:8,border:`1px solid ${T.border}`,background:"transparent",color:T.dim,fontSize:12,cursor:"pointer"}}>✕</button>
+          </div>
+        ) : (
+          <div style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}} onClick={()=>{setCustomQ(customQ||defaultQ);setEditing(true);}}>
+            <span style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{customQ||defaultQ}</span>
+            <span style={{fontSize:10,color:T.gold,flexShrink:0}}>✎ 修改</span>
+          </div>
+        )}
+      </div>
+
+      {loading && <div style={{padding:"8px 0",fontSize:12,color:T.muted,display:"flex",alignItems:"center",gap:8}}><span style={{animation:"pulse 1s ease infinite"}}>🔍</span>搜索 eBay 成交记录...</div>}
+      {err && <div style={{padding:"10px 12px",borderRadius:8,background:"rgba(212,80,80,0.08)",border:"1px solid rgba(212,80,80,0.2)",fontSize:12,color:T.red}}>{err}</div>}
+
+      {result?.success && (
+        <div style={{animation:"fadeUp 0.4s ease both"}}>
+          {!result.results?.length ? (
+            <div style={{fontSize:12,color:T.muted,padding:"8px 0"}}>未找到成交记录，建议点"✎ 修改"调整搜索词</div>
+          ) : <>
+            {result.stats && (
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:14}}>
+                {[{l:"均价",v:result.stats.avg},{l:"最低",v:result.stats.min},{l:"最高",v:result.stats.max}].map((s,i)=>(
+                  <div key={i} style={{background:T.s3,borderRadius:10,padding:"10px 8px",textAlign:"center"}}>
+                    <div style={{fontSize:10,color:T.dim,marginBottom:4}}>{s.l}</div>
+                    <div style={{fontFamily:"'Space Mono',monospace",fontSize:14,fontWeight:700,color:T.gold}}>{fmtUSD(s.v)}</div>
+                    <div style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,marginTop:2}}>{toRMB(s.v)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{fontSize:10,color:T.dim,fontFamily:"'Space Mono',monospace",letterSpacing:1,marginBottom:8}}>近期成交 · {result.stats?.count} 条</div>
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              {result.results?.slice(0,5).map((item,i)=>{
+                const date=item.endTime?new Date(item.endTime).toLocaleDateString("zh-CN",{month:"numeric",day:"numeric"}):"";
+                return <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",background:T.s3,borderRadius:8}}>
+                  <div style={{flex:1,minWidth:0,marginRight:8}}>
+                    <div style={{fontSize:11,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.title}</div>
+                    <div style={{fontSize:10,color:T.dim,marginTop:2}}>{date}{item.condition?` · ${item.condition}`:""}</div>
+                  </div>
+                  <div style={{textAlign:"right",flexShrink:0}}>
+                    <div style={{fontFamily:"'Space Mono',monospace",fontSize:13,fontWeight:700,color:T.green}}>{fmtUSD(item.price)}</div>
+                    <div style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim}}>{toRMB(item.price)}</div>
+                  </div>
+                </div>;
+              })}
+            </div>
+            <div style={{fontSize:10,color:T.dim,marginTop:8,textAlign:"right"}}>数据来源：eBay Completed Listings</div>
+          </>}
+        </div>
+      )}
+    </div>
+  );
+}
 // ─── Verification Panel ───────────────────────────────────
 function VerificationBanner({ result, onApplySuggestion }) {
   if (!result) return null;
