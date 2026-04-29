@@ -39,12 +39,12 @@ ${summary}
 Reply with ONLY this JSON, nothing else before or after:
 {"players":[{"name":"player name","completeness":"50%","missing":[{"priority":"High","card":"card name","reason":"one line reason","estimatedPrice":"$50-100"}],"tip":"one tip"}],"overallTip":"one overall tip"}
 
-Rules: max 3 missing items per player, use English for card names, Chinese for tips/reasons, no extra text outside JSON.`;
+Rules: max 2 missing items per player, keep all text SHORT (under 20 chars each field), no extra text outside JSON.`;
 
   try {
     const message = await client.messages.create({
       model: "claude-opus-4-5",
-      max_tokens: 2000,
+      max_tokens: 4096,
       messages: [{ role: "user", content: prompt }],
     });
 
