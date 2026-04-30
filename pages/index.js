@@ -2,15 +2,10 @@ import { useState, useEffect, useCallback, useRef, createContext, useContext } f
 import Head from "next/head";
 
 const T = {
-  // Gold — more restrained, used as accent only
   gold:"#C8A84B", goldLight:"#E2C870", goldDark:"#8A6612",
-  // Backgrounds — true dark, Apple-style depth layers
   bg:"#000000", surface:"#0A0A0A", s2:"#111111", s3:"#1A1A1A",
-  // Borders — very subtle
   border:"rgba(255,255,255,0.07)", borderGold:"rgba(200,168,75,0.3)",
-  // Text — high contrast, Instagram-style clarity
   text:"#FFFFFF", muted:"#8E8E93", dim:"#48484A",
-  // Semantic
   green:"#30D158", blue:"#0A84FF", orange:"#FF9F0A", red:"#FF453A",
 };
 const STATUS = {
@@ -39,15 +34,12 @@ const ZH = {
   "塔图姆":"Jayson Tatum","哈登":"James Harden","威少":"Russell Westbrook","杜兰特":"Kevin Durant",
   "欧文":"Kyrie Irving","汤普森":"Klay Thompson","克莱":"Klay Thompson","里拉德":"Damian Lillard",
   "阿门":"Amen Thompson","皮蓬":"Scottie Pippen","邓肯":"Tim Duncan","韦德":"Dwyane Wade",
-  "旗手":"Cooper Flagg","弗拉格":"Cooper Flagg",
+  "旗手":"Cooper Flagg","弗拉格":"Cooper Flagg","哈珀":"Dylan Harper","迪伦":"Dylan Harper",
   "勇士":"Golden State Warriors","湖人":"Los Angeles Lakers","凯尔特人":"Boston Celtics","绿军":"Boston Celtics",
   "火箭":"Houston Rockets","雄鹿":"Milwaukee Bucks","马刺":"San Antonio Spurs","尼克斯":"New York Knicks",
   "公牛":"Chicago Bulls","热火":"Miami Heat","快船":"Los Angeles Clippers","森林狼":"Minnesota Timberwolves",
   "雷霆":"Oklahoma City Thunder","独行侠":"Dallas Mavericks","小牛":"Dallas Mavericks","太阳":"Phoenix Suns",
   "步行者":"Indiana Pacers","猛龙":"Toronto Raptors","老鹰":"Atlanta Hawks","篮网":"Brooklyn Nets",
-  "奇才":"Washington Wizards","骑士":"Cleveland Cavaliers","活塞":"Detroit Pistons","爵士":"Utah Jazz",
-  "国王":"Sacramento Kings","鹈鹕":"New Orleans Pelicans","灰熊":"Memphis Grizzlies","魔术":"Orlando Magic",
-  "开拓者":"Portland Trail Blazers","掘金":"Denver Nuggets","76人":"Philadelphia 76ers",
   "新秀卡":"Rookie RC","签名卡":"Auto Autograph","金卡":"Gold","银卡":"Silver Prizm",
   "折射":"Refractor","碎冰":"Cracked Ice Sapphire","彩虹":"Rainbow","全息":"Holo",
   "评级卡":"PSA BGS SGC","满分":"PSA 10","送评":"grading","持有":"holding","待出":"for_sale","已出":"sold",
@@ -105,119 +97,86 @@ function compressImg(url, maxDim=1400, q=0.85) {
 const mkThumb = url => compressImg(url, 400, 0.65);
 const toB64 = f => new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(f); });
 
-// API
+// ── API ──────────────────────────────────────────────────────────────────────
 const apiRecognize = async (f,b) => { const r=await fetch("/api/recognize",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({frontImage:f,backImage:b})}); const d=await r.json(); if(!r.ok) return{success:false,error:d.error||"识别失败"}; return{success:true,data:d.data}; };
 const apiGet = async () => { const r=await fetch("/api/cards"); if(!r.ok) return[]; return r.json(); };
 const apiAdd = async c => { const r=await fetch("/api/cards",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(c)}); if(!r.ok){const e=await r.json();throw new Error(e.error);} return r.json(); };
 const apiPut = async (id,c) => { const r=await fetch(`/api/cards/${id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(c)}); if(!r.ok){const e=await r.json();throw new Error(e.error);} return r.json(); };
 const apiDel = async id => { const r=await fetch(`/api/cards/${id}`,{method:"DELETE"}); if(!r.ok){const e=await r.json();throw new Error(e.error);} };
 
-
-// Market price API
 const apiMarketPrice = async (card) => {
-  const r = await fetch("/api/market-price", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      player: card.player,
-      series: card.series,
-      parallel: card.parallel,
-      numbered: card.numbered,
-      grade: card.grade,
-      year: card.year,
-    }),
-  });
+  const r = await fetch("/api/market-price", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ player:card.player, series:card.series, parallel:card.parallel, numbered:card.numbered, grade:card.grade, year:card.year }) });
   const d = await r.json();
-  if (!r.ok) return { success: false, error: d.error || "查询失败" };
-  return d;
+  return r.ok ? d : { success:false, error:d.error||"查询失败" };
 };
-
 
 const apiCardStory = async (card) => {
-  const r = await fetch("/api/card-story", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      backImage: card.back_image,
-      player: card.player,
-      year: card.year,
-      series: card.series,
-      cardNumber: card.card_number,
-    }),
-  });
+  const r = await fetch("/api/card-story", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ backImage:card.back_image, player:card.player, year:card.year, series:card.series, cardNumber:card.card_number }) });
   const d = await r.json();
-  if (!r.ok) return { success: false, error: d.error };
-  return d;
+  return r.ok ? d : { success:false, error:d.error };
 };
-
 
 const apiVerifyCard = async (card) => {
   try {
-    const r = await fetch("/api/verify-card", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        player: card.player,
-        year: card.year,
-        series: card.series,
-        parallel: card.parallel,
-        numbered: card.numbered,
-        manufacturer: card.manufacturer,
-      }),
-    });
+    const r = await fetch("/api/verify-card", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ player:card.player, year:card.year, series:card.series, parallel:card.parallel, numbered:card.numbered, manufacturer:card.manufacturer }) });
     const d = await r.json();
-    if (!r.ok) return null;
-    return d;
+    return r.ok ? d : null;
   } catch { return null; }
 };
 
-
-// Save story to card permanently
 const apiSaveStory = async (cardId, story) => {
-  try {
-    await apiPut(cardId, { story });
-  } catch(e) { console.error("Story save failed:", e); }
+  try { await apiPut(cardId, { story }); } catch(e) { console.error("Story save failed:", e); }
 };
-
-
-const apiRadar = async (cards, pcPlayers) => {
-  try {
-    // Only send minimal fields needed for analysis
-    const lightCards = cards.map(c => ({
-      player: c.player, year: c.year, series: c.series,
-      parallel: c.parallel, numbered: c.numbered,
-      grade: c.grade, category: c.category, status: c.status,
-    }));
-    const lightPlayers = pcPlayers.map(p => ({ name: p.name, short: p.short }));
-    const r = await fetch("/api/radar", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cards: lightCards, pcPlayers: lightPlayers }),
-    });
-    const d = await r.json();
-    if (!r.ok) return { success: false, error: d.error };
-    return d;
-  } catch(e) { return { success: false, error: e.message }; }
-};
-
 
 const apiEbayPrice = async (card, customQuery) => {
   try {
-    const r = await fetch("/api/ebay-price", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        player: card.player, year: card.year, series: card.series,
-        parallel: card.parallel, numbered: card.numbered,
-        grade: card.grade, customQuery,
-      }),
-    });
+    const r = await fetch("/api/ebay-price", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ player:card.player, year:card.year, series:card.series, parallel:card.parallel, numbered:card.numbered, grade:card.grade, customQuery }) });
     const d = await r.json();
-    if (!r.ok) return { success: false, error: d.error };
-    return d;
-  } catch(e) { return { success: false, error: e.message }; }
+    return r.ok ? d : { success:false, error:d.error };
+  } catch(e) { return { success:false, error:e.message }; }
 };
-// Context
+
+// ── 雷达 API ─────────────────────────────────────────────────────────────────
+const apiGetGoals = async () => {
+  const r = await fetch("/api/collection-goals");
+  return r.ok ? r.json() : [];
+};
+const apiCreateGoal = async (body) => {
+  const r = await fetch("/api/collection-goals", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
+  const d = await r.json();
+  return r.ok ? { success:true, data:d } : { success:false, error:d.error };
+};
+const apiDeleteGoal = async (id) => {
+  const r = await fetch(`/api/collection-goals?id=${id}`, { method:"DELETE" });
+  return r.ok;
+};
+const apiSyncGoal = async (id) => {
+  const r = await fetch(`/api/collection-goals?action=sync&id=${id}`, { method:"POST", headers:{"Content-Type":"application/json"}, body:"{}" });
+  const d = await r.json();
+  return r.ok ? { success:true, data:d } : { success:false, error:d.error };
+};
+const apiGetChecklists = async (search) => {
+  const url = search ? `/api/checklists?search=${encodeURIComponent(search)}` : "/api/checklists";
+  const r = await fetch(url);
+  return r.ok ? r.json() : [];
+};
+const apiGenerateChecklist = async (body) => {
+  const r = await fetch("/api/checklists", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
+  const d = await r.json();
+  return r.ok ? { success:true, data:d } : { success:false, error:d.error };
+};
+const apiRadarScan = async () => {
+  const r = await fetch("/api/radar-scan", { method:"POST" });
+  const d = await r.json();
+  return r.ok ? { success:true, ...d } : { success:false, error:d.error };
+};
+const apiGetScanResults = async () => {
+  const r = await fetch("/api/radar-scan");
+  const d = await r.json();
+  return r.ok ? d : { mustWatch:[], niceToHave:[], lastScanned:null };
+};
+
+// ── Context ──────────────────────────────────────────────────────────────────
 const Ctx = createContext(null);
 const useApp = () => useContext(Ctx);
 
@@ -234,7 +193,6 @@ function AppProvider({children}) {
   const [rate,setRate]       = useState(DEF_RATE);
 
   useEffect(() => {
-    // Register service worker for PWA
     if (typeof window !== "undefined" && "serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js").catch(() => {});
     }
@@ -242,11 +200,7 @@ function AppProvider({children}) {
     if(sc)setDC(sc); if(sr)setRate(parseFloat(sr));
     apiGet().then(d=>{
       setCards(d);
-      if(d.length>0){
-        const pick=d[Math.floor(Math.random()*d.length)];
-        setDaily(pick);
-        setDailyHistory([pick.id]);
-      }
+      if(d.length>0){ const pick=d[Math.floor(Math.random()*d.length)]; setDaily(pick); setDailyHistory([pick.id]); }
       setLoading(false);
     });
   },[]);
@@ -294,7 +248,7 @@ function AppProvider({children}) {
   return <Ctx.Provider value={{cards,pcP,loading,daily,screen,sel,stats,toast,dc,rate,toggleDC,nav,refreshDaily,addCard,updCard,delCard,showToast}}>{children}</Ctx.Provider>;
 }
 
-// Shared UI
+// ── Shared UI ─────────────────────────────────────────────────────────────────
 function Chip({label,color,bg,style={}}) { return <span style={{display:"inline-flex",alignItems:"center",padding:"3px 10px",borderRadius:20,background:bg||`${color}15`,color,fontSize:10,fontWeight:600,letterSpacing:0.2,flexShrink:0,...style}}>{label}</span>; }
 function GChip({grade}) { if(!grade||grade==="RAW")return null; const p=grade==="PSA 10",b=grade.startsWith("BGS"); return <Chip label={grade} color={p?"#FFD700":b?"#C0C0C0":T.muted} bg={p?"rgba(255,215,0,0.12)":b?"rgba(192,192,192,0.1)":"rgba(122,122,140,0.1)"} />; }
 function Thumb({card,size=56,ps}) {
@@ -335,13 +289,11 @@ function Skel({width="100%",height=16,radius=6,style={}}) { return <div style={{
 function ToastView({toast}) { if(!toast)return null; return <div style={{position:"fixed",top:20,left:"50%",transform:"translateX(-50%)",padding:"10px 20px",borderRadius:10,zIndex:999,background:toast.type==="warn"?"rgba(224,120,48,0.9)":"rgba(61,170,106,0.9)",color:"#fff",fontSize:13,fontWeight:600,boxShadow:"0 4px 20px rgba(0,0,0,0.4)",backdropFilter:"blur(8px)",animation:"fadeUp 0.3s ease both",whiteSpace:"nowrap"}}>{toast.msg}</div>; }
 function CurrBtn() { const {dc,toggleDC}=useApp(); return <button onClick={toggleDC} style={{padding:"6px 12px",borderRadius:8,border:`1px solid ${T.borderGold}`,background:`rgba(201,168,76,0.08)`,color:T.gold,fontFamily:"'Space Mono',monospace",fontSize:11,fontWeight:700,cursor:"pointer"}}>{dc==="RMB"?"¥ RMB":"$ USD"}</button>; }
 
-// Form primitives
 function FF({label,required,children}) { return <div style={{marginBottom:14}}><label style={{display:"block",fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,letterSpacing:0.8,marginBottom:6}}>{label.toUpperCase()} {required&&<span style={{color:T.gold}}>*</span>}</label>{children}</div>; }
 function Inp({value,onChange,placeholder,type="text"}) { return <input type={type} value={value||""} onChange={e=>onChange(e.target.value)} placeholder={placeholder} style={{width:"100%",padding:"10px 12px",border:`1px solid ${T.border}`,borderRadius:8,background:T.s3,color:T.text,fontSize:13,outline:"none",transition:"border-color 0.2s"}} onFocus={e=>e.target.style.borderColor=T.gold} onBlur={e=>e.target.style.borderColor=T.border} />; }
 function Sl({value,onChange,options}) { return <select value={value||""} onChange={e=>onChange(e.target.value)} style={{width:"100%",padding:"10px 12px",border:`1px solid ${T.border}`,borderRadius:8,background:T.s3,color:value?T.text:T.muted,fontSize:13,outline:"none",appearance:"none",cursor:"pointer"}}>{options.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>; }
 function Tog({label,value,onChange}) { return <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 12px",border:`1px solid ${T.border}`,borderRadius:8,background:T.s3,cursor:"pointer"}} onClick={()=>onChange(!value)}><span style={{fontSize:13,color:T.muted}}>{label}</span><div style={{width:36,height:20,borderRadius:10,background:value?T.gold:T.border,position:"relative",transition:"background 0.2s",flexShrink:0}}><div style={{position:"absolute",top:2,left:value?16:2,width:16,height:16,borderRadius:"50%",background:"#fff",transition:"left 0.2s"}} /></div></div>; }
 
-// EMPTY factory — always fresh array for tags
 const EMPTY = () => ({ player:"",team:"",year:"",series:"",manufacturer:"",card_number:"",parallel:"",numbered:"",is_one_of_one:false,sub_series:"",is_rc:false,grade:"RAW",grade_company:"",grade_score:"",category:"PC",status:"holding",price_currency:"RMB",buy_price:"",buy_date:"",sell_price:"",sell_date:"",source:"",location:"",notes:"",tags:[] });
 
 function CardFormFields({form,set,tab,setTab}) {
@@ -410,43 +362,25 @@ function buildTags(form) {
   return [...new Set(tags)];
 }
 
-
-// ─── Verification Panel ───────────────────────────────────
 function VerificationBanner({ result, onApplySuggestion }) {
   if (!result) return null;
-
   const issues = [];
   if (result.parallelValid === false) issues.push("parallel");
   if (result.seriesValid === false) issues.push("series");
   if (result.numberedValid === false) issues.push("numbered");
-
   if (issues.length === 0 && result.confidence !== "low") {
-    return (
-      <div style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 14px", borderRadius:10, background:"rgba(61,170,106,0.08)", border:"1px solid rgba(61,170,106,0.2)", marginBottom:14 }}>
-        <span style={{ fontSize:14 }}>✅</span>
-        <span style={{ fontSize:12, color:T.green }}>卡片信息已验证，与官方 checklist 一致</span>
-      </div>
-    );
+    return <div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 14px",borderRadius:10,background:"rgba(61,170,106,0.08)",border:"1px solid rgba(61,170,106,0.2)",marginBottom:14}}><span style={{fontSize:14}}>✅</span><span style={{fontSize:12,color:T.green}}>卡片信息已验证，与官方 checklist 一致</span></div>;
   }
-
   return (
-    <div style={{ padding:"12px 14px", borderRadius:10, background:"rgba(224,120,48,0.08)", border:"1px solid rgba(224,120,48,0.25)", marginBottom:14 }}>
-      <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:8 }}>
-        <span style={{ fontSize:14 }}>⚠️</span>
-        <span style={{ fontSize:12, color:T.orange, fontWeight:700 }}>识别信息需要确认</span>
-      </div>
-      {result.notes && <p style={{ fontSize:12, color:T.muted, lineHeight:1.7, marginBottom:result.parallelSuggestions?.length?10:0 }}>{result.notes}</p>}
+    <div style={{padding:"12px 14px",borderRadius:10,background:"rgba(224,120,48,0.08)",border:"1px solid rgba(224,120,48,0.25)",marginBottom:14}}>
+      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}><span style={{fontSize:14}}>⚠️</span><span style={{fontSize:12,color:T.orange,fontWeight:700}}>识别信息需要确认</span></div>
+      {result.notes && <p style={{fontSize:12,color:T.muted,lineHeight:1.7,marginBottom:result.parallelSuggestions?.length?10:0}}>{result.notes}</p>}
       {result.parallelValid === false && result.parallelSuggestions?.length > 0 && (
         <div>
-          <div style={{ fontSize:11, color:T.dim, marginBottom:6, fontFamily:"'Space Mono',monospace" }}>该系列实际存在的平行类型：</div>
-          <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
-            {result.parallelSuggestions.map((s, i) => (
-              <button key={i} onClick={() => onApplySuggestion("parallel", s)} style={{
-                padding:"5px 12px", borderRadius:8, border:`1px solid ${T.borderGold}`,
-                background:`rgba(201,168,76,0.1)`, color:T.gold, fontSize:11, cursor:"pointer",
-              }}>
-                {s} ✓
-              </button>
+          <div style={{fontSize:11,color:T.dim,marginBottom:6,fontFamily:"'Space Mono',monospace"}}>该系列实际存在的平行类型：</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+            {result.parallelSuggestions.map((s,i)=>(
+              <button key={i} onClick={()=>onApplySuggestion("parallel",s)} style={{padding:"5px 12px",borderRadius:8,border:`1px solid ${T.borderGold}`,background:`rgba(201,168,76,0.1)`,color:T.gold,fontSize:11,cursor:"pointer"}}>{s} ✓</button>
             ))}
           </div>
         </div>
@@ -585,7 +519,6 @@ function EditScreen() {
   const [back,setBack]=useState(card?.back_image||null);
   const [form,setForm]=useState(()=>card?{...EMPTY(),player:card.player||"",team:card.team||"",year:card.year||"",series:card.series||"",manufacturer:card.manufacturer||"",card_number:card.card_number||"",parallel:card.parallel||"",numbered:card.numbered||"",is_one_of_one:card.is_one_of_one||false,sub_series:card.sub_series||"",is_rc:card.is_rc||false,grade:card.grade||"RAW",grade_company:card.grade_company||"",grade_score:card.grade_score||"",category:card.category||"PC",status:card.status||"holding",price_currency:card.price_currency||"RMB",buy_price:card.buy_price||"",buy_date:card.buy_date||"",sell_price:card.sell_price||"",sell_date:card.sell_date||"",source:card.source||"",location:card.location||"",notes:card.notes||"",tags:Array.isArray(card.tags)?card.tags.join(", "):(card.tags||"")}:EMPTY());
   const [saving,setSaving]=useState(false); const [tab,setTab]=useState("card");
-  const [verifyResult,setVerifyResult]=useState(null);
   if(!card){nav("home");return null;}
   const set=k=>v=>setForm(f=>({...f,[k]:v}));
 
@@ -622,22 +555,16 @@ function EditScreen() {
   </div>;
 }
 
-// ─── Daily Card — Image First + Persistent Story ──────────
 function DailyCardFull({ card, players }) {
   const { nav, updCard } = useApp();
   const [story, setStory] = useState(card.story || null);
   const [loadingStory, setLoadingStory] = useState(false);
 
-  // Auto-load story if not saved yet
   useEffect(() => {
     if (!card.story && card.id) {
       setLoadingStory(true);
       apiCardStory(card).then(r => {
-        if (r.success) {
-          setStory(r.story);
-          // Persist to DB
-          apiSaveStory(card.id, r.story);
-        }
+        if (r.success) { setStory(r.story); apiSaveStory(card.id, r.story); }
         setLoadingStory(false);
       });
     }
@@ -647,77 +574,37 @@ function DailyCardFull({ card, players }) {
   const grad = cGrad(card.player, players);
 
   return (
-    <div style={{ borderRadius:20, overflow:"hidden", background:T.s2, boxShadow:"0 2px 24px rgba(0,0,0,0.5)", cursor:"pointer" }}
-      onClick={()=>nav("detail", card)}>
-
-      {/* Two-column layout: card image left, story right */}
-      <div style={{ display:"flex", gap:0 }}>
-
-        {/* Left: Card image */}
-        <div style={{ width:"45%", flexShrink:0, position:"relative", background:hasPhoto?"#000":grad, minHeight:280, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden" }}>
+    <div style={{borderRadius:20,overflow:"hidden",background:T.s2,boxShadow:"0 2px 24px rgba(0,0,0,0.5)",cursor:"pointer"}} onClick={()=>nav("detail",card)}>
+      <div style={{display:"flex",gap:0}}>
+        <div style={{width:"45%",flexShrink:0,position:"relative",background:hasPhoto?"#000":grad,minHeight:280,display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
           {hasPhoto
-            ? <img src={card.front_image} alt={card.player} style={{ width:"100%", height:"100%", objectFit:"contain", display:"block" }} />
-            : <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:16, gap:8 }}>
-                <span style={{ fontSize:56 }}>{pEmoji(card.player, players)}</span>
-                <span style={{ fontSize:11, color:"rgba(255,255,255,0.4)", textAlign:"center", fontWeight:500 }}>{card.player}</span>
-              </div>
+            ? <img src={card.front_image} alt={card.player} style={{width:"100%",height:"100%",objectFit:"contain",display:"block"}} />
+            : <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:16,gap:8}}><span style={{fontSize:56}}>{pEmoji(card.player,players)}</span><span style={{fontSize:11,color:"rgba(255,255,255,0.4)",textAlign:"center",fontWeight:500}}>{card.player}</span></div>
           }
-          {/* Bottom gradient */}
-          <div style={{ position:"absolute", bottom:0, left:0, right:0, height:"40%", background:"linear-gradient(to top, rgba(0,0,0,0.7), transparent)", pointerEvents:"none" }} />
-          {/* Badges */}
-          <div style={{ position:"absolute", bottom:10, left:10, display:"flex", flexDirection:"column", gap:4 }}>
-            {card.numbered && <span style={{ padding:"2px 8px", borderRadius:20, background:"rgba(200,168,75,0.9)", color:"#000", fontSize:10, fontWeight:700 }}>{card.numbered}</span>}
-            {card.is_one_of_one && <span style={{ padding:"2px 8px", borderRadius:20, background:"rgba(255,215,0,0.9)", color:"#000", fontSize:10, fontWeight:700 }}>1/1</span>}
-            {card.is_rc && <span style={{ padding:"2px 8px", borderRadius:20, background:"rgba(48,209,88,0.85)", color:"#000", fontSize:10, fontWeight:700 }}>RC</span>}
+          <div style={{position:"absolute",bottom:0,left:0,right:0,height:"40%",background:"linear-gradient(to top, rgba(0,0,0,0.7), transparent)",pointerEvents:"none"}} />
+          <div style={{position:"absolute",bottom:10,left:10,display:"flex",flexDirection:"column",gap:4}}>
+            {card.numbered&&<span style={{padding:"2px 8px",borderRadius:20,background:"rgba(200,168,75,0.9)",color:"#000",fontSize:10,fontWeight:700}}>{card.numbered}</span>}
+            {card.is_one_of_one&&<span style={{padding:"2px 8px",borderRadius:20,background:"rgba(255,215,0,0.9)",color:"#000",fontSize:10,fontWeight:700}}>1/1</span>}
+            {card.is_rc&&<span style={{padding:"2px 8px",borderRadius:20,background:"rgba(48,209,88,0.85)",color:"#000",fontSize:10,fontWeight:700}}>RC</span>}
           </div>
         </div>
-
-        {/* Right: Info + Story */}
-        <div style={{ flex:1, display:"flex", flexDirection:"column", padding:"16px 14px", minWidth:0, overflow:"hidden" }}>
-          {/* Player + series */}
-          <div style={{ marginBottom:10 }}>
-            <div style={{ fontSize:11, color:T.gold, fontWeight:600, marginBottom:4, letterSpacing:0.3 }}>
+        <div style={{flex:1,display:"flex",flexDirection:"column",padding:"16px 14px",minWidth:0,overflow:"hidden"}}>
+          <div style={{marginBottom:10}}>
+            <div style={{fontSize:11,color:T.gold,fontWeight:600,marginBottom:4,letterSpacing:0.3}}>
               {players?.find(p=>p.name===card.player)?.emoji} {players?.find(p=>p.name===card.player)?.short || card.player.split(" ").pop()}
             </div>
-            <div style={{ fontSize:14, fontWeight:700, color:T.text, lineHeight:1.3, marginBottom:3 }}>
-              {card.parallel || card.series}
-            </div>
-            <div style={{ fontSize:11, color:T.muted, lineHeight:1.4 }}>
-              {card.year}{card.sub_series ? ` · ${card.sub_series}` : ""}
-            </div>
+            <div style={{fontSize:14,fontWeight:700,color:T.text,lineHeight:1.3,marginBottom:3}}>{card.parallel||card.series}</div>
+            <div style={{fontSize:11,color:T.muted,lineHeight:1.4}}>{card.year}{card.sub_series?` · ${card.sub_series}`:""}</div>
           </div>
-
-          {/* Status chip */}
-          <div style={{ marginBottom:12 }}>
-            <span style={{ fontSize:10, color:STATUS[card.status]?.color||T.green, background:STATUS[card.status]?.bg, padding:"3px 8px", borderRadius:20, fontWeight:600 }}>
-              {STATUS[card.status]?.label||"持有"}
-            </span>
-            {card.grade && card.grade !== "RAW" && <span style={{ fontSize:10, color:"#FFD700", background:"rgba(255,215,0,0.1)", padding:"3px 8px", borderRadius:20, fontWeight:600, marginLeft:4 }}>{card.grade}</span>}
+          <div style={{marginBottom:12}}>
+            <span style={{fontSize:10,color:STATUS[card.status]?.color||T.green,background:STATUS[card.status]?.bg,padding:"3px 8px",borderRadius:20,fontWeight:600}}>{STATUS[card.status]?.label||"持有"}</span>
+            {card.grade&&card.grade!=="RAW"&&<span style={{fontSize:10,color:"#FFD700",background:"rgba(255,215,0,0.1)",padding:"3px 8px",borderRadius:20,fontWeight:600,marginLeft:4}}>{card.grade}</span>}
           </div>
-
-          {/* Divider */}
-          <div style={{ height:1, background:T.border, marginBottom:10 }} />
-
-          {/* Story */}
-          <div style={{ flex:1, overflow:"hidden", position:"relative" }}>
-            {loadingStory ? (
-              <div style={{ display:"flex", alignItems:"center", gap:6, fontSize:11, color:T.dim }}>
-                <span style={{ animation:"pulse 1s ease infinite" }}>✨</span>
-                <span>生成故事中...</span>
-              </div>
-            ) : story ? (
-              <div
-                onClick={e=>e.stopPropagation()}
-                style={{ maxHeight:140, overflowY:"auto", scrollbarWidth:"none", msOverflowStyle:"none" }}
-              >
-                <style>{".story-scroll::-webkit-scrollbar{display:none}"}</style>
-                <p className="story-scroll" style={{ fontSize:11, color:T.muted, lineHeight:1.75, margin:0 }}>
-                  {story}
-                </p>
-              </div>
-            ) : (
-              <p style={{ fontSize:11, color:T.dim, lineHeight:1.6, margin:0 }}>暂无故事</p>
-            )}
+          <div style={{height:1,background:T.border,marginBottom:10}} />
+          <div style={{flex:1,overflow:"hidden",position:"relative"}}>
+            {loadingStory?(<div style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:T.dim}}><span style={{animation:"pulse 1s ease infinite"}}>✨</span><span>生成故事中...</span></div>)
+              :story?(<div onClick={e=>e.stopPropagation()} style={{maxHeight:140,overflowY:"auto",scrollbarWidth:"none"}}><p style={{fontSize:11,color:T.muted,lineHeight:1.75,margin:0}}>{story}</p></div>)
+              :(<p style={{fontSize:11,color:T.dim,lineHeight:1.6,margin:0}}>暂无故事</p>)}
           </div>
         </div>
       </div>
@@ -727,19 +614,9 @@ function DailyCardFull({ card, players }) {
 
 function HomeScreen() {
   const {cards,pcP,stats,loading,daily,nav,refreshDaily,dc,toggleDC,rate}=useApp();
-  if(loading) return (
-    <div style={{padding:"20px"}}>
-      <Skel height={24} width={140} style={{marginBottom:6}} />
-      <Skel height={12} width={100} style={{marginBottom:28}} />
-      <Skel height={320} radius={20} style={{marginBottom:20}} />
-      <Skel height={100} radius={16} style={{marginBottom:16}} />
-      <Skel height={160} radius={14} />
-    </div>
-  );
+  if(loading) return <div style={{padding:"20px"}}><Skel height={24} width={140} style={{marginBottom:6}} /><Skel height={12} width={100} style={{marginBottom:28}} /><Skel height={320} radius={20} style={{marginBottom:20}} /><Skel height={100} radius={16} style={{marginBottom:16}} /><Skel height={160} radius={14} /></div>;
   return (
     <div style={{paddingBottom:90}}>
-
-      {/* Header */}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"20px 20px 12px"}}>
         <div>
           <h1 style={{fontSize:26,fontWeight:700,color:T.text,letterSpacing:"-0.5px",lineHeight:1.1,fontFamily:"'Inter',sans-serif"}}>Card Vault</h1>
@@ -751,32 +628,17 @@ function HomeScreen() {
           <button onClick={()=>nav("add")} style={{width:38,height:38,borderRadius:"50%",border:"none",background:T.gold,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,cursor:"pointer",flexShrink:0}}>📷</button>
         </div>
       </div>
-
-      {/* Daily Featured */}
-      {daily && (
-        <div style={{padding:"0 16px 20px",animation:"fadeUp 0.5s ease both"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,padding:"0 4px"}}>
-            <span style={{fontSize:17,fontWeight:600,color:T.text,letterSpacing:"-0.3px"}}>今日精选</span>
-            <button onClick={e=>{e.stopPropagation();refreshDaily();}} style={{background:"none",border:"none",color:T.gold,fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",gap:4,fontWeight:500,padding:0}}>
-              🔀 换一张
-            </button>
-          </div>
-          <DailyCardFull card={daily} players={pcP} />
+      {daily&&(<div style={{padding:"0 16px 20px",animation:"fadeUp 0.5s ease both"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,padding:"0 4px"}}>
+          <span style={{fontSize:17,fontWeight:600,color:T.text,letterSpacing:"-0.3px"}}>今日精选</span>
+          <button onClick={e=>{e.stopPropagation();refreshDaily();}} style={{background:"none",border:"none",color:T.gold,fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",gap:4,fontWeight:500,padding:0}}>🔀 换一张</button>
         </div>
-      )}
-
-      {/* Stats Grid */}
+        <DailyCardFull card={daily} players={pcP} />
+      </div>)}
       <div style={{padding:"0 16px 16px",animation:"fadeUp 0.5s ease 80ms both"}}>
         <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
-          {[
-            {icon:"🃏",v:stats.total,l:"总卡数",go:"search"},
-            {icon:"❤️",v:stats.pc,l:"PC",go:"pc"},
-            {icon:"📈",v:stats.inv,l:"投资",go:"search"},
-            {icon:"💎",v:stats.longhold,l:"长持",go:"search"},
-          ].map((s,i)=>(
-            <div key={i} onClick={()=>nav(s.go)} style={{padding:"14px 6px",borderRadius:16,textAlign:"center",background:T.s2,cursor:"pointer",transition:"background 0.15s"}}
-              onMouseEnter={e=>e.currentTarget.style.background=T.s3}
-              onMouseLeave={e=>e.currentTarget.style.background=T.s2}>
+          {[{icon:"🃏",v:stats.total,l:"总卡数",go:"search"},{icon:"❤️",v:stats.pc,l:"PC",go:"pc"},{icon:"📈",v:stats.inv,l:"投资",go:"search"},{icon:"💎",v:stats.longhold,l:"长持",go:"search"}].map((s,i)=>(
+            <div key={i} onClick={()=>nav(s.go)} style={{padding:"14px 6px",borderRadius:16,textAlign:"center",background:T.s2,cursor:"pointer",transition:"background 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=T.s3} onMouseLeave={e=>e.currentTarget.style.background=T.s2}>
               <div style={{fontSize:18,marginBottom:6}}>{s.icon}</div>
               <div style={{fontSize:22,fontWeight:700,color:T.text,letterSpacing:"-0.5px",lineHeight:1}}>{s.v}</div>
               <div style={{fontSize:10,color:T.muted,marginTop:4}}>{s.l}</div>
@@ -784,21 +646,13 @@ function HomeScreen() {
           ))}
         </div>
       </div>
-
-      {/* Cost */}
-      {(stats.cost!==null&&stats.cost>0) && (
-        <div style={{margin:"0 16px 16px",padding:"14px 16px",borderRadius:16,background:`linear-gradient(135deg,rgba(200,168,75,0.1),rgba(200,168,75,0.04))`,border:`1px solid rgba(200,168,75,0.2)`,animation:"fadeUp 0.5s ease 120ms both"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <span style={{fontSize:13,color:T.muted}}>持仓总成本</span>
-            <span style={{fontSize:18,fontWeight:700,color:T.gold,fontFamily:"monospace"}}>{fmtP(stats.cost,dc,rate)}</span>
-          </div>
-          <div style={{textAlign:"right",marginTop:2}}>
-            <span style={{fontSize:11,color:T.dim}}>≈ {dc==="RMB"?fmtDual(stats.cost,rate).usd:fmtDual(stats.cost,rate).rmb}</span>
-          </div>
+      {(stats.cost!==null&&stats.cost>0)&&(<div style={{margin:"0 16px 16px",padding:"14px 16px",borderRadius:16,background:`linear-gradient(135deg,rgba(200,168,75,0.1),rgba(200,168,75,0.04))`,border:`1px solid rgba(200,168,75,0.2)`,animation:"fadeUp 0.5s ease 120ms both"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{fontSize:13,color:T.muted}}>持仓总成本</span>
+          <span style={{fontSize:18,fontWeight:700,color:T.gold,fontFamily:"monospace"}}>{fmtP(stats.cost,dc,rate)}</span>
         </div>
-      )}
-
-      {/* Recent */}
+        <div style={{textAlign:"right",marginTop:2}}><span style={{fontSize:11,color:T.dim}}>≈ {dc==="RMB"?fmtDual(stats.cost,rate).usd:fmtDual(stats.cost,rate).rmb}</span></div>
+      </div>)}
       <div style={{padding:"0 16px",animation:"fadeUp 0.5s ease 160ms both"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
           <span style={{fontSize:17,fontWeight:600,color:T.text,letterSpacing:"-0.3px"}}>最近入库</span>
@@ -809,15 +663,9 @@ function HomeScreen() {
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
           {cards.slice(0,5).map(c=><CardRow key={c.id} card={c} ps={pcP} onClick={()=>nav("detail",c)} />)}
-          {cards.length===0 && (
-            <div style={{textAlign:"center",padding:"48px 0",color:T.dim}}>
-              <div style={{fontSize:48,marginBottom:12}}>🃏</div>
-              <div style={{fontSize:14}}>还没有卡片，点右上角📷开始录入</div>
-            </div>
-          )}
+          {cards.length===0&&(<div style={{textAlign:"center",padding:"48px 0",color:T.dim}}><div style={{fontSize:48,marginBottom:12}}>🃏</div><div style={{fontSize:14}}>还没有卡片，点右上角📷开始录入</div></div>)}
         </div>
       </div>
-
     </div>
   );
 }
@@ -826,10 +674,7 @@ function SearchScreen() {
   const {cards,pcP,nav}=useApp();
   const [q,setQ]=useState(""); const [cf,setCf]=useState("all"); const [pf,setPf]=useState("all"); const [yf,setYf]=useState("all");
   const ref=useRef(); useEffect(()=>{setTimeout(()=>ref.current?.focus(),100);},[]);
-
-  // Get sorted unique years from cards
   const years = ["all",...[...new Set(cards.map(c=>c.year).filter(Boolean))].sort((a,b)=>b.localeCompare(a))];
-
   const list=cards.filter(c=>{
     if(cf!=="all"&&c.category!==cf)return false;
     if(pf!=="all"&&c.player!==pf)return false;
@@ -871,13 +716,11 @@ function SearchScreen() {
   </div>;
 }
 
-
-// ─── Market Price Panel (eBay Real Data) ─────────────────
 function MarketPricePanel({ card }) {
   const { rate } = useApp();
   const [loading, setLoading] = useState(false);
-  const [result, setResult]   = useState(null);
-  const [err, setErr]         = useState(null);
+  const [result, setResult] = useState(null);
+  const [err, setErr] = useState(null);
   const [editing, setEditing] = useState(false);
   const [customQ, setCustomQ] = useState("");
   const defaultQ = [card.player?.split(" ").pop(),card.year,card.series?.replace(/Basketball|NBA|Panini/gi,"").trim(),card.parallel,card.numbered,card.grade!=="RAW"?card.grade:null].filter(Boolean).join(" ");
@@ -914,40 +757,30 @@ function MarketPricePanel({ card }) {
       </div>
       {loading&&<div style={{padding:"8px 0",fontSize:12,color:T.muted,display:"flex",alignItems:"center",gap:8}}><span style={{animation:"pulse 1s ease infinite"}}>🔍</span>搜索 eBay 成交记录...</div>}
       {err&&<div style={{padding:"10px 12px",borderRadius:8,background:"rgba(212,80,80,0.08)",border:"1px solid rgba(212,80,80,0.2)",fontSize:12,color:T.red}}>{err}</div>}
-      {result?.success&&(
-        <div style={{animation:"fadeUp 0.4s ease both"}}>
-          {!result.results?.length?(
-            <div style={{fontSize:12,color:T.muted,padding:"8px 0"}}>未找到成交记录，建议点"✎ 修改"调整搜索词</div>
-          ):<>
-            {result.stats&&<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:14}}>
-              {[{l:"均价",v:result.stats.avg},{l:"最低",v:result.stats.min},{l:"最高",v:result.stats.max}].map((s,i)=>(
-                <div key={i} style={{background:T.s3,borderRadius:10,padding:"10px 8px",textAlign:"center"}}>
-                  <div style={{fontSize:10,color:T.dim,marginBottom:4}}>{s.l}</div>
-                  <div style={{fontFamily:"'Space Mono',monospace",fontSize:14,fontWeight:700,color:T.gold}}>{fmtUSD(s.v)}</div>
-                  <div style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,marginTop:2}}>{toRMB(s.v)}</div>
-                </div>
-              ))}
-            </div>}
-            <div style={{fontSize:10,color:T.dim,fontFamily:"'Space Mono',monospace",letterSpacing:1,marginBottom:8}}>近期成交 · {result.stats?.count} 条</div>
-            <div style={{display:"flex",flexDirection:"column",gap:6}}>
-              {result.results?.slice(0,5).map((item,i)=>{
-                const date=item.endTime?new Date(item.endTime).toLocaleDateString("zh-CN",{month:"numeric",day:"numeric"}):"";
-                return <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",background:T.s3,borderRadius:8}}>
-                  <div style={{flex:1,minWidth:0,marginRight:8}}>
-                    <div style={{fontSize:11,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.title}</div>
-                    <div style={{fontSize:10,color:T.dim,marginTop:2}}>{date}{item.condition?` · ${item.condition}`:""}</div>
-                  </div>
-                  <div style={{textAlign:"right",flexShrink:0}}>
-                    <div style={{fontFamily:"'Space Mono',monospace",fontSize:13,fontWeight:700,color:T.green}}>{fmtUSD(item.price)}</div>
-                    <div style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim}}>{toRMB(item.price)}</div>
-                  </div>
-                </div>;
-              })}
-            </div>
-            <div style={{fontSize:10,color:T.dim,marginTop:8,textAlign:"right"}}>数据来源：eBay Completed Listings</div>
-          </>}
-        </div>
-      )}
+      {result?.success&&(<div style={{animation:"fadeUp 0.4s ease both"}}>
+        {!result.results?.length?(<div style={{fontSize:12,color:T.muted,padding:"8px 0"}}>未找到成交记录，建议点"✎ 修改"调整搜索词</div>):<>
+          {result.stats&&<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:14}}>
+            {[{l:"均价",v:result.stats.avg},{l:"最低",v:result.stats.min},{l:"最高",v:result.stats.max}].map((s,i)=>(
+              <div key={i} style={{background:T.s3,borderRadius:10,padding:"10px 8px",textAlign:"center"}}>
+                <div style={{fontSize:10,color:T.dim,marginBottom:4}}>{s.l}</div>
+                <div style={{fontFamily:"'Space Mono',monospace",fontSize:14,fontWeight:700,color:T.gold}}>{fmtUSD(s.v)}</div>
+                <div style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,marginTop:2}}>{toRMB(s.v)}</div>
+              </div>
+            ))}
+          </div>}
+          <div style={{fontSize:10,color:T.dim,fontFamily:"'Space Mono',monospace",letterSpacing:1,marginBottom:8}}>近期成交 · {result.stats?.count} 条</div>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {result.results?.slice(0,5).map((item,i)=>{
+              const date=item.endTime?new Date(item.endTime).toLocaleDateString("zh-CN",{month:"numeric",day:"numeric"}):"";
+              return <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",background:T.s3,borderRadius:8}}>
+                <div style={{flex:1,minWidth:0,marginRight:8}}><div style={{fontSize:11,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.title}</div><div style={{fontSize:10,color:T.dim,marginTop:2}}>{date}{item.condition?` · ${item.condition}`:""}</div></div>
+                <div style={{textAlign:"right",flexShrink:0}}><div style={{fontFamily:"'Space Mono',monospace",fontSize:13,fontWeight:700,color:T.green}}>{fmtUSD(item.price)}</div><div style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim}}>{toRMB(item.price)}</div></div>
+              </div>;
+            })}
+          </div>
+          <div style={{fontSize:10,color:T.dim,marginTop:8,textAlign:"right"}}>数据来源：eBay Completed Listings</div>
+        </>}
+      </div>)}
     </div>
   );
 }
@@ -994,23 +827,14 @@ function DetailScreen() {
           <Chip label={CAT[card.category]?.label} color={CAT[card.category]?.color} />
         </div>
       </div>
-{card.story && (
-        <div style={{background:T.s2,border:`1px solid ${T.border}`,borderRadius:14,padding:16,marginBottom:12}}>
-          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:10}}>
-            <span style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,letterSpacing:1}}>PLAYER STORY</span>
-            <span style={{fontSize:10,color:T.dim}}>{card.back_image?"📷 来自卡背":"✨ AI生成"}</span>
-          </div>
-          <p style={{fontSize:13,color:T.text,lineHeight:1.9,margin:0}}>{card.story}</p>
-        </div>
-      )}
+      {card.story&&(<div style={{background:T.s2,border:`1px solid ${T.border}`,borderRadius:14,padding:16,marginBottom:12}}>
+        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:10}}><span style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,letterSpacing:1}}>PLAYER STORY</span><span style={{fontSize:10,color:T.dim}}>{card.back_image?"📷 来自卡背":"✨ AI生成"}</span></div>
+        <p style={{fontSize:13,color:T.text,lineHeight:1.9,margin:0}}>{card.story}</p>
+      </div>)}
       {card.buy_price&&<div style={{background:`linear-gradient(135deg,rgba(201,168,76,0.08),rgba(201,168,76,0.03))`,border:`1px solid ${T.borderGold}`,borderRadius:14,padding:"14px 16px",marginBottom:16}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div><div style={{fontSize:11,color:T.muted,marginBottom:4}}>买入价</div><div style={{fontFamily:"'Space Mono',monospace",fontSize:20,fontWeight:700,color:T.gold}}>{dual.rmb}</div><div style={{fontFamily:"'Space Mono',monospace",fontSize:12,color:T.dim,marginTop:2}}>≈ {dual.usd}</div></div>
-          {card.sell_price&&<div style={{textAlign:"right"}}>
-            <div style={{fontSize:11,color:T.muted,marginBottom:4}}>出售价</div>
-            <div style={{fontFamily:"'Space Mono',monospace",fontSize:20,fontWeight:700,color:T.green}}>{sellDual.rmb}</div>
-            {pnl!==null&&<div style={{fontFamily:"'Space Mono',monospace",fontSize:12,color:pnl>=0?T.green:T.red,marginTop:2}}>{pnl>=0?"▲ ":"▼ "}{fmtDual(Math.abs(pnl),rate,card.price_currency||"RMB").rmb}</div>}
-          </div>}
+          {card.sell_price&&<div style={{textAlign:"right"}}><div style={{fontSize:11,color:T.muted,marginBottom:4}}>出售价</div><div style={{fontFamily:"'Space Mono',monospace",fontSize:20,fontWeight:700,color:T.green}}>{sellDual.rmb}</div>{pnl!==null&&<div style={{fontFamily:"'Space Mono',monospace",fontSize:12,color:pnl>=0?T.green:T.red,marginTop:2}}>{pnl>=0?"▲ ":"▼ "}{fmtDual(Math.abs(pnl),rate,card.price_currency||"RMB").rmb}</div>}</div>}
         </div>
       </div>}
       <MarketPricePanel card={card} />
@@ -1045,11 +869,7 @@ function PCScreen() {
       <div style={{width:40}} />
     </div>
     <div style={{padding:"20px 20px 0"}}>
-      {(()=>{const p=pcP.find(x=>x.name===sel);return p&&<div style={{display:"flex",alignItems:"center",gap:14,marginBottom:20}}>
-        <span style={{fontSize:42}}>{p.emoji}</span>
-        <div><div style={{fontFamily:"'Inter',sans-serif",fontSize:20,color:T.text}}>{p.name}</div>
-        <div style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.dim,marginTop:2}}>{pCards.length} 张 · {fmtP(pCards.reduce((s,c)=>s+(parseFloat(c.buy_price)||0),0),dc,rate)}</div></div>
-      </div>;})()}
+      {(()=>{const p=pcP.find(x=>x.name===sel);return p&&<div style={{display:"flex",alignItems:"center",gap:14,marginBottom:20}}><span style={{fontSize:42}}>{p.emoji}</span><div><div style={{fontFamily:"'Inter',sans-serif",fontSize:20,color:T.text}}>{p.name}</div><div style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.dim,marginTop:2}}>{pCards.length} 张 · {fmtP(pCards.reduce((s,c)=>s+(parseFloat(c.buy_price)||0),0),dc,rate)}</div></div></div>;})()}
     </div>
     <div style={{padding:"0 20px",display:"flex",flexDirection:"column",gap:10,paddingBottom:90}}>
       {pCards.length>0?pCards.map(c=><CardRow key={c.id} card={c} ps={pcP} onClick={()=>nav("detail",c)} />):
@@ -1060,9 +880,7 @@ function PCScreen() {
   return <div style={{paddingBottom:90}}>
     <div style={{padding:"20px 20px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
       <div><h2 style={{fontSize:22,fontWeight:700,color:T.text,letterSpacing:"-0.4px"}}>PC Vault</h2><p style={{fontSize:12,color:T.muted,marginTop:3}}>你热爱的球星</p></div>
-      <button onClick={()=>nav("radar")} style={{padding:"8px 14px",borderRadius:12,border:`1px solid ${T.borderGold}`,background:`rgba(200,168,75,0.08)`,color:T.gold,fontSize:12,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:5}}>
-        🎯 补缺雷达
-      </button>
+      <button onClick={()=>nav("radar")} style={{padding:"8px 14px",borderRadius:12,border:`1px solid ${T.borderGold}`,background:`rgba(200,168,75,0.08)`,color:T.gold,fontSize:12,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:5}}>🎯 雷达</button>
     </div>
     <div style={{padding:"0 20px",display:"flex",flexDirection:"column",gap:14}}>
       {pcP.sort((a,b)=>a.display_order-b.display_order).map((player,i)=>{
@@ -1072,22 +890,15 @@ function PCScreen() {
         return <div key={player.id} style={{borderRadius:18,overflow:"hidden",border:`1px solid ${T.border}`,animation:`fadeUp 0.4s ease ${i*80}ms both`,cursor:"pointer"}} onClick={()=>setSel(player.name)}>
           <div style={{padding:"18px 20px",background:`linear-gradient(135deg,${player.color1}30,${player.color2}20)`,borderBottom:pc.length>0?`1px solid ${T.border}`:"none",display:"flex",alignItems:"center",gap:14}}>
             <span style={{fontSize:36}}>{player.emoji}</span>
-            <div style={{flex:1}}>
-              <div style={{fontFamily:"'Inter',sans-serif",fontSize:17,color:T.text}}>{player.name}</div>
-              <div style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.dim,marginTop:2}}>{pc.length} 张 · {fmtP(val,dc,rate)}</div>
-              {pc.length>0&&<div style={{display:"flex",gap:6,marginTop:6}}>
-                {Object.entries(stC).filter(([,v])=>v>0).map(([k,v])=><Chip key={k} label={`${STATUS[k].label} ${v}`} color={STATUS[k].color} bg={STATUS[k].bg} style={{fontSize:9,padding:"2px 6px"}} />)}
-              </div>}
+            <div style={{flex:1}}><div style={{fontFamily:"'Inter',sans-serif",fontSize:17,color:T.text}}>{player.name}</div><div style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.dim,marginTop:2}}>{pc.length} 张 · {fmtP(val,dc,rate)}</div>
+              {pc.length>0&&<div style={{display:"flex",gap:6,marginTop:6}}>{Object.entries(stC).filter(([,v])=>v>0).map(([k,v])=><Chip key={k} label={`${STATUS[k].label} ${v}`} color={STATUS[k].color} bg={STATUS[k].bg} style={{fontSize:9,padding:"2px 6px"}} />)}</div>}
             </div>
             <span style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.gold}}>→</span>
           </div>
           {pc.slice(0,3).map((c,ci)=>(
             <div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 20px",background:T.surface,borderBottom:ci<Math.min(pc.length,3)-1?`1px solid ${T.border}`:"none"}}>
               <div><span style={{fontSize:12,color:T.muted}}>{c.parallel||c.series}</span>{c.numbered&&<span style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.gold,marginLeft:6}}>{c.numbered}</span>}</div>
-              <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                {c.buy_price&&<span style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.gold}}>{fmtP(c.buy_price,dc,rate,c.price_currency||"RMB")}</span>}
-                <Chip label={STATUS[c.status]?.label} color={STATUS[c.status]?.color} bg={STATUS[c.status]?.bg} style={{fontSize:9,padding:"2px 6px"}} />
-              </div>
+              <div style={{display:"flex",gap:6,alignItems:"center"}}>{c.buy_price&&<span style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.gold}}>{fmtP(c.buy_price,dc,rate,c.price_currency||"RMB")}</span>}<Chip label={STATUS[c.status]?.label} color={STATUS[c.status]?.color} bg={STATUS[c.status]?.bg} style={{fontSize:9,padding:"2px 6px"}} /></div>
             </div>
           ))}
           {pc.length===0&&<div style={{padding:"14px 20px",background:T.surface,fontSize:12,color:T.dim}}>还没有录入卡片，开始建仓吧 →</div>}
@@ -1098,7 +909,7 @@ function PCScreen() {
 }
 
 function StatsScreen() {
-  const {cards,pcP,stats,dc,rate,toggleDC}=useApp();
+  const {cards,pcP,stats,dc,rate}=useApp();
   const soldCards=cards.filter(c=>c.status==="sold"&&c.sell_price);
   const pnl=soldCards.reduce((s,c)=>s+(parseFloat(c.sell_price)||0)-(parseFloat(c.buy_price)||0),0);
   const holdCost=cards.filter(c=>c.status!=="sold").reduce((s,c)=>s+(parseFloat(c.buy_price)||0),0);
@@ -1157,13 +968,8 @@ function StatsScreen() {
           const pct=stats.total>0?(cs.length/stats.total)*100:0;
           const val=cs.reduce((s,c)=>s+(parseFloat(c.buy_price)||0),0);
           return <div key={player.id} style={{marginBottom:14}}>
-            <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
-              <span style={{fontSize:12,color:T.muted}}>{player.emoji} {player.short}</span>
-              <span style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.gold}}>{cs.length}张 · {fmtP(val,dc,rate)}</span>
-            </div>
-            <div style={{height:3,borderRadius:2,background:T.s3}}>
-              <div style={{height:"100%",borderRadius:2,width:`${pct}%`,background:`linear-gradient(90deg,${player.color1},${T.gold})`,transition:"width 0.6s ease"}} />
-            </div>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}><span style={{fontSize:12,color:T.muted}}>{player.emoji} {player.short}</span><span style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.gold}}>{cs.length}张 · {fmtP(val,dc,rate)}</span></div>
+            <div style={{height:3,borderRadius:2,background:T.s3}}><div style={{height:"100%",borderRadius:2,width:`${pct}%`,background:`linear-gradient(90deg,${player.color1},${T.gold})`,transition:"width 0.6s ease"}} /></div>
           </div>;
         })}
       </div>
@@ -1171,116 +977,337 @@ function StatsScreen() {
   </div>;
 }
 
-
-// ─── Radar Screen ─────────────────────────────────────────
+// ── 雷达页面（完整新版）────────────────────────────────────────────────────────
 function RadarScreen() {
-  const { cards, pcP, nav } = useApp();
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
-  const [err, setErr] = useState(null);
-  const [expanded, setExpanded] = useState({});
+  const { pcP, rate } = useApp();
+  const [tab, setTab] = useState("scan");
+  const [scanData, setScanData] = useState(null);
+  const [goals, setGoals] = useState([]);
+  const [scanning, setScanning] = useState(false);
+  const [loadingGoals, setLoadingGoals] = useState(false);
+  const [scanErr, setScanErr] = useState(null);
+  const [showNewGoal, setShowNewGoal] = useState(false);
 
-  const run = async () => {
-    setLoading(true); setErr(null); setResult(null);
-    const r = await apiRadar(cards, pcP);
-    if (r.success) setResult(r);
-    else setErr(r.error);
-    setLoading(false);
+  useEffect(() => { loadScanResults(); loadGoals(); }, []);
+
+  const loadScanResults = async () => { const d = await apiGetScanResults(); setScanData(d); };
+  const loadGoals = async () => { setLoadingGoals(true); const d = await apiGetGoals(); setGoals(d); setLoadingGoals(false); };
+
+  const runScan = async () => {
+    setScanning(true); setScanErr(null);
+    const r = await apiRadarScan();
+    if (r.success) await loadScanResults(); else setScanErr(r.error || "扫描失败");
+    setScanning(false);
   };
 
-  const toggle = (name) => setExpanded(e => ({ ...e, [name]: !e[name] }));
+  const fmtTime = iso => { if (!iso) return ""; const d = new Date(iso); return d.toLocaleString("zh-CN", { month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit" }); };
+  const fmtPrice = (price, currency) => { if (!price) return "—"; if (currency === "USD") return `$${Number(price).toFixed(0)}  ≈ ¥${Math.round(price * rate).toLocaleString("zh-CN")}`; return `¥${Number(price).toLocaleString("zh-CN")}`; };
 
-  const PRIORITY_COLOR = { "高": T.red, "中": T.orange, "低": T.muted };
+  const totalMissing = goals.reduce((s, g) => s + (g.missing_count || 0), 0);
+  const hasResults = scanData && (scanData.mustWatch?.length > 0 || scanData.niceToHave?.length > 0);
+
+  if (showNewGoal) return <NewGoalScreen pcP={pcP} onDone={() => { setShowNewGoal(false); loadGoals(); }} onBack={() => setShowNewGoal(false)} />;
 
   return (
     <div style={{ paddingBottom: 90 }}>
-      <div style={{ padding:"20px 20px 12px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+      <div style={{ padding:"20px 20px 0", display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
         <div>
-          <h2 style={{ fontSize:24, fontWeight:700, color:T.text, letterSpacing:"-0.5px" }}>补缺雷达</h2>
-          <p style={{ fontSize:12, color:T.muted, marginTop:3 }}>分析你的 PC 收藏缺口</p>
+          <h2 style={{ fontSize:24, fontWeight:700, color:T.text, letterSpacing:"-0.5px" }}>🎯 雷达</h2>
+          <p style={{ fontSize:12, color:T.muted, marginTop:3 }}>
+            {goals.length} 个目标 · {totalMissing} 张缺口
+            {scanData?.lastScanned && <span style={{ marginLeft:6 }}>· 扫描于 {fmtTime(scanData.lastScanned)}</span>}
+          </p>
         </div>
-        <button onClick={run} disabled={loading} style={{ padding:"10px 18px", borderRadius:12, border:"none", background:loading?T.s2:`linear-gradient(135deg,${T.gold},${T.goldDark})`, color:loading?T.dim:"#000", fontSize:13, fontWeight:700, cursor:loading?"not-allowed":"pointer", transition:"all 0.2s" }}>
-          {loading ? (
-            <span style={{ display:"flex", alignItems:"center", gap:6 }}>
-              {[0,1,2].map(i=><span key={i} style={{ width:4,height:4,borderRadius:"50%",background:T.dim,display:"inline-block",animation:`pulse 0.8s ease ${i*150}ms infinite` }} />)}
-            </span>
-          ) : result ? "🔄 重新分析" : "🎯 开始分析"}
+        <button onClick={runScan} disabled={scanning || goals.length === 0} style={{ padding:"10px 16px", borderRadius:12, border:"none", background: scanning || goals.length === 0 ? T.s2 : `linear-gradient(135deg,${T.gold},${T.goldDark})`, color: scanning || goals.length === 0 ? T.dim : "#000", fontSize:12, fontWeight:700, cursor: scanning || goals.length === 0 ? "not-allowed" : "pointer" }}>
+          {scanning ? <span style={{ display:"flex", alignItems:"center", gap:5 }}>{[0,1,2].map(i=><span key={i} style={{ width:4,height:4,borderRadius:"50%",background:T.dim,display:"inline-block",animation:`pulse 0.8s ease ${i*150}ms infinite` }} />)}<span>扫描中</span></span> : "🔍 立即扫描"}
         </button>
       </div>
 
-      <div style={{ padding:"0 16px" }}>
-        {!result && !loading && !err && (
-          <div style={{ background:T.s2, borderRadius:16, padding:20, marginBottom:16 }}>
-            <div style={{ fontSize:13, color:T.muted, lineHeight:1.8 }}>
-              AI 会分析你的 PC 球星卡收藏，找出缺失的重要卡片，帮你制定补缺计划。
+      <div style={{ display:"flex", gap:2, margin:"14px 16px 0", background:T.s2, borderRadius:10, padding:3 }}>
+        {[["scan","今日发现"],["goals","收集目标"]].map(([id,label]) => (
+          <button key={id} onClick={() => setTab(id)} style={{ flex:1, padding:"8px", borderRadius:8, border:"none", background: tab===id ? T.s3 : "transparent", color: tab===id ? T.gold : T.muted, fontSize:13, fontWeight: tab===id ? 700 : 400, transition:"all 0.2s" }}>{label}</button>
+        ))}
+      </div>
+
+      <div style={{ padding:"14px 16px" }}>
+        {scanErr && <div style={{ padding:"10px 14px", borderRadius:10, background:"rgba(212,80,80,0.08)", border:"1px solid rgba(212,80,80,0.2)", fontSize:12, color:T.red, marginBottom:14 }}>⚠️ {scanErr}</div>}
+
+        {tab === "scan" && (
+          <div style={{ animation:"fadeUp 0.3s ease both" }}>
+            {!hasResults && !scanning && (
+              <div style={{ background:T.s2, borderRadius:16, padding:24, textAlign:"center" }}>
+                <div style={{ fontSize:40, marginBottom:12 }}>📡</div>
+                <div style={{ fontSize:14, color:T.text, marginBottom:6 }}>{goals.length === 0 ? "先创建收集目标" : "点击右上角"立即扫描""}</div>
+                <div style={{ fontSize:12, color:T.muted, lineHeight:1.7 }}>{goals.length === 0 ? "在"收集目标"页面定义你要找的卡，雷达会每天帮你盯着市场" : "扫描会搜索 eBay 上所有你缺口卡片的在售 listing"}</div>
+                {goals.length === 0 && <button onClick={() => setTab("goals")} style={{ marginTop:14, padding:"10px 20px", borderRadius:10, border:"none", background:T.gold, color:"#000", fontSize:13, fontWeight:700, cursor:"pointer" }}>去创建目标 →</button>}
+              </div>
+            )}
+            {scanning && (
+              <div style={{ background:T.s2, borderRadius:16, padding:24, textAlign:"center" }}>
+                <div style={{ fontSize:32, marginBottom:12, animation:"pulse 1s ease infinite" }}>🔍</div>
+                <div style={{ fontSize:14, color:T.text, marginBottom:4 }}>正在扫描 eBay</div>
+                <div style={{ fontSize:12, color:T.muted }}>搜索 {totalMissing} 张缺口卡...</div>
+              </div>
+            )}
+            {hasResults && !scanning && <>
+              {scanData.mustWatch?.length > 0 && (
+                <div style={{ marginBottom:20 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+                    <span style={{ fontSize:11, fontWeight:700, color:T.red, background:"rgba(255,69,58,0.12)", padding:"3px 10px", borderRadius:20 }}>🔴 重点关注</span>
+                    <span style={{ fontSize:11, color:T.dim }}>{scanData.mustWatch.length} 个</span>
+                  </div>
+                  {scanData.mustWatch.map((group, gi) => <ScanResultGroup key={gi} group={group} fmtPrice={fmtPrice} onDismiss={loadScanResults} />)}
+                </div>
+              )}
+              {scanData.niceToHave?.length > 0 && (
+                <div>
+                  <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+                    <span style={{ fontSize:11, fontWeight:700, color:T.orange, background:"rgba(255,159,10,0.12)", padding:"3px 10px", borderRadius:20 }}>🟡 可能感兴趣</span>
+                    <span style={{ fontSize:11, color:T.dim }}>{scanData.niceToHave.length} 个</span>
+                  </div>
+                  {scanData.niceToHave.map((group, gi) => <ScanResultGroup key={gi} group={group} fmtPrice={fmtPrice} onDismiss={loadScanResults} />)}
+                </div>
+              )}
+            </>}
+          </div>
+        )}
+
+        {tab === "goals" && (
+          <div style={{ animation:"fadeUp 0.3s ease both" }}>
+            <button onClick={() => setShowNewGoal(true)} style={{ width:"100%", padding:"12px", borderRadius:12, border:`1px dashed ${T.borderGold}`, background:"rgba(200,168,75,0.06)", color:T.gold, fontSize:13, fontWeight:600, cursor:"pointer", marginBottom:14 }}>
+              + 新建收集目标
+            </button>
+            {loadingGoals && [1,2,3].map(i => <Skel key={i} height={80} radius={14} style={{ marginBottom:10 }} />)}
+            {!loadingGoals && goals.length === 0 && (
+              <div style={{ textAlign:"center", padding:"32px 0", color:T.dim }}>
+                <div style={{ fontSize:32, marginBottom:8 }}>🎯</div>
+                <div style={{ fontSize:13 }}>还没有收集目标</div>
+                <div style={{ fontSize:11, marginTop:4 }}>点上方按钮创建你的第一个目标</div>
+              </div>
+            )}
+            {goals.map(goal => <GoalCard key={goal.id} goal={goal} onDelete={async () => { await apiDeleteGoal(goal.id); loadGoals(); }} onSync={async () => { await apiSyncGoal(goal.id); loadGoals(); }} />)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ScanResultGroup({ group, fmtPrice, onDismiss }) {
+  const [expanded, setExpanded] = useState(false);
+  const wi = group.watch_item;
+  const results = group.results || [];
+  const best = results[0];
+
+  return (
+    <div style={{ background:T.s2, borderRadius:14, overflow:"hidden", marginBottom:10, border:`1px solid ${T.border}` }}>
+      <div onClick={() => setExpanded(e => !e)} style={{ padding:"12px 14px", cursor:"pointer" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontSize:13, fontWeight:600, color:T.text, marginBottom:3 }}>{wi?.description}</div>
+            <div style={{ fontSize:11, color:T.muted }}>来自：{wi?.goal?.title || "—"} · {results.length} 个结果</div>
+          </div>
+          <div style={{ textAlign:"right", flexShrink:0, marginLeft:10 }}>
+            {best && <div style={{ fontSize:13, fontWeight:700, color:T.green, fontFamily:"monospace" }}>${Number(best.price).toFixed(0)}</div>}
+            <div style={{ fontSize:10, color:T.dim, marginTop:2 }}>{expanded ? "↑" : "↓"}</div>
+          </div>
+        </div>
+      </div>
+      {expanded && (
+        <div style={{ borderTop:`1px solid ${T.border}` }}>
+          {results.map((r, i) => (
+            <div key={r.id} style={{ display:"flex", gap:10, padding:"10px 14px", borderBottom: i < results.length - 1 ? `1px solid ${T.border}` : "none", alignItems:"flex-start" }}>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:12, color:T.text, lineHeight:1.4, marginBottom:4, overflow:"hidden", display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical" }}>{r.title}</div>
+                <div style={{ fontSize:12, fontWeight:700, color:T.gold, fontFamily:"monospace" }}>{fmtPrice(r.price, r.price_currency)}</div>
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", gap:6, flexShrink:0 }}>
+                <a href={r.listing_url} target="_blank" rel="noreferrer" style={{ padding:"5px 10px", borderRadius:8, background:T.gold, color:"#000", fontSize:11, fontWeight:700, textDecoration:"none", textAlign:"center" }}>查看</a>
+              </div>
             </div>
-            <div style={{ marginTop:12, display:"flex", flexWrap:"wrap", gap:8 }}>
-              {pcP.map(p => (
-                <div key={p.id} style={{ display:"flex", alignItems:"center", gap:6, padding:"6px 12px", borderRadius:20, background:T.s3, fontSize:12, color:T.muted }}>
-                  <span>{p.emoji}</span><span>{p.short}</span>
-                  <span style={{ color:T.gold, fontWeight:600 }}>{cards.filter(c=>c.player===p.name&&c.category==="PC").length}张</span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GoalCard({ goal, onDelete, onSync }) {
+  const [syncing, setSyncing] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const TIER_COLOR = { common:T.muted, numbered:T.blue, premium:T.gold, ultra:T.orange, "1of1":T.red };
+  const doSync = async e => { e.stopPropagation(); setSyncing(true); await onSync(); setSyncing(false); };
+  const pct = goal.progress_pct || 0;
+  const missing = goal.missing_items || [];
+
+  return (
+    <div style={{ background:T.s2, borderRadius:14, overflow:"hidden", marginBottom:10, border:`1px solid ${T.border}` }}>
+      <div onClick={() => setExpanded(e => !e)} style={{ padding:"14px", cursor:"pointer" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontSize:14, fontWeight:600, color:T.text, marginBottom:3 }}>{goal.title}</div>
+            <div style={{ fontSize:11, color:T.muted }}>{goal.checklist?.set_name || "—"} · {goal.owned_count}/{goal.total_items} 已有 · <span style={{ color:T.orange }}>{goal.missing_count} 缺口</span></div>
+          </div>
+          <div style={{ display:"flex", gap:6, alignItems:"center", marginLeft:10 }}>
+            <button onClick={doSync} disabled={syncing} style={{ padding:"5px 10px", borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.blue, fontSize:11, cursor:"pointer" }}>{syncing ? "同步..." : "↻ 同步"}</button>
+            <span style={{ fontSize:14, color:T.dim }}>{expanded ? "↑" : "↓"}</span>
+          </div>
+        </div>
+        <div style={{ height:4, borderRadius:2, background:T.s3 }}>
+          <div style={{ height:"100%", borderRadius:2, width:`${pct}%`, background:`linear-gradient(90deg,${T.gold},${T.goldLight})`, transition:"width 0.6s ease" }} />
+        </div>
+        <div style={{ display:"flex", justifyContent:"space-between", marginTop:4 }}>
+          <span style={{ fontSize:10, color:T.dim }}>收集进度</span>
+          <span style={{ fontSize:10, color:T.gold, fontFamily:"monospace", fontWeight:700 }}>{pct}%</span>
+        </div>
+      </div>
+      {expanded && missing.length > 0 && (
+        <div style={{ borderTop:`1px solid ${T.border}`, padding:"10px 14px", maxHeight:260, overflowY:"auto" }}>
+          <div style={{ fontSize:10, color:T.dim, fontFamily:"'Space Mono',monospace", letterSpacing:1, marginBottom:8 }}>缺口清单（{missing.length} 项）</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+            {missing.map((item, i) => (
+              <span key={i} style={{ padding:"4px 10px", borderRadius:20, fontSize:11, fontWeight:600, color:TIER_COLOR[item.tier]||T.muted, background:`${TIER_COLOR[item.tier]||T.muted}15`, border:`1px solid ${TIER_COLOR[item.tier]||T.muted}30` }}>
+                {item.name_cn || item.name}{item.numbered && item.print_run ? ` /${item.print_run}` : ""}
+              </span>
+            ))}
+          </div>
+          <button onClick={() => { if (window.confirm(`删除目标"${goal.title}"？`)) onDelete(); }} style={{ width:"100%", marginTop:12, padding:"8px", borderRadius:10, border:"1px solid rgba(212,80,80,0.2)", background:"rgba(212,80,80,0.05)", color:T.red, fontSize:12, cursor:"pointer" }}>删除此目标</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NewGoalScreen({ pcP, onDone, onBack }) {
+  const [step, setStep] = useState("mode");
+  const [mode, setMode] = useState("");
+  const [title, setTitle] = useState("");
+  const [playerName, setPlayerName] = useState("");
+  const [playerNameCn, setPlayerNameCn] = useState("");
+  const [checklists, setChecklists] = useState([]);
+  const [selectedCL, setSelectedCL] = useState(null);
+  const [clSearch, setClSearch] = useState("");
+  const [filterCond, setFilterCond] = useState({ color:"", max_print_run:"" });
+  const [generating, setGenerating] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => { if (step === "checklist") loadChecklists(""); }, [step]);
+
+  const loadChecklists = async (search) => { const data = await apiGetChecklists(search); setChecklists(data); };
+
+  const generateChecklist = async () => {
+    if (!clSearch) return;
+    setGenerating(true); setErr("");
+    const r = await apiGenerateChecklist({ set_name:clSearch, checklist_type: mode === "full_players" ? "player_set" : "parallels", use_ai:true });
+    if (r.success) { setSelectedCL(r.data); setChecklists(prev => [r.data, ...prev.filter(c => c.id !== r.data.id)]); }
+    else setErr(r.error || "AI生成失败");
+    setGenerating(false);
+  };
+
+  const save = async () => {
+    if (!title || !mode || !selectedCL) { setErr("请填写完整信息"); return; }
+    setSaving(true); setErr("");
+    const filter = mode === "filtered_parallels" ? {
+      ...(filterCond.color ? { color:filterCond.color } : {}),
+      ...(filterCond.max_print_run ? { max_print_run:parseInt(filterCond.max_print_run) } : {}),
+    } : undefined;
+    const r = await apiCreateGoal({ title, mode, checklist_id:selectedCL.id, player_name:playerName||undefined, player_name_cn:playerNameCn||undefined, filter_condition:filter });
+    setSaving(false);
+    if (r.success) onDone(); else setErr(r.error || "创建失败");
+  };
+
+  const MODE_OPTIONS = [
+    { id:"full_parallels", icon:"🌈", label:"彩虹全平行", desc:"一个球员×一个系列，收集所有平行版本" },
+    { id:"full_players", icon:"👥", label:"子集全球员", desc:"一个子集（如NOTG），收集所有球员卡" },
+    { id:"filtered_parallels", icon:"🎯", label:"条件筛选", desc:"按颜色或编号范围筛选平行（如全部/50金折）" },
+  ];
+
+  return (
+    <div style={{ paddingBottom:90 }}>
+      <div style={{ padding:"16px 20px", display:"flex", alignItems:"center", gap:14, borderBottom:`1px solid ${T.border}`, position:"sticky", top:0, background:T.bg, zIndex:10 }}>
+        <button onClick={onBack} style={{ background:"none", border:"none", color:T.muted, fontSize:20 }}>←</button>
+        <span style={{ fontFamily:"'Space Mono',monospace", fontSize:11, color:T.dim }}>新建收集目标</span>
+      </div>
+      <div style={{ padding:"20px" }}>
+        {err && <div style={{ padding:"10px 14px", borderRadius:10, background:"rgba(212,80,80,0.08)", border:"1px solid rgba(212,80,80,0.2)", fontSize:12, color:T.red, marginBottom:14 }}>{err}</div>}
+
+        {step === "mode" && (
+          <div style={{ animation:"fadeUp 0.3s ease both" }}>
+            <div style={{ fontSize:16, fontWeight:600, color:T.text, marginBottom:4 }}>选择收集模式</div>
+            <div style={{ fontSize:12, color:T.muted, marginBottom:20 }}>根据你的收集逻辑选择</div>
+            {MODE_OPTIONS.map(opt => (
+              <div key={opt.id} onClick={() => { setMode(opt.id); setStep("config"); }} style={{ display:"flex", gap:14, padding:"16px", borderRadius:14, border:`1px solid ${mode===opt.id?T.borderGold:T.border}`, background: mode===opt.id ? "rgba(200,168,75,0.06)" : T.s2, marginBottom:10, cursor:"pointer", transition:"all 0.2s" }}>
+                <span style={{ fontSize:28 }}>{opt.icon}</span>
+                <div><div style={{ fontSize:14, fontWeight:600, color:T.text, marginBottom:3 }}>{opt.label}</div><div style={{ fontSize:12, color:T.muted, lineHeight:1.6 }}>{opt.desc}</div></div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {step === "config" && (
+          <div style={{ animation:"fadeUp 0.3s ease both" }}>
+            <div style={{ fontSize:16, fontWeight:600, color:T.text, marginBottom:16 }}>填写目标信息</div>
+            <FF label="目标名称" required><Inp value={title} onChange={setTitle} placeholder="如：KG 21-22 Prizm 彩虹" /></FF>
+            {(mode === "full_parallels" || mode === "filtered_parallels") && <>
+              <FF label="球员英文名"><Inp value={playerName} onChange={setPlayerName} placeholder="如 Kevin Garnett" /></FF>
+              <FF label="球员中文名"><Inp value={playerNameCn} onChange={setPlayerNameCn} placeholder="如 加内特" /></FF>
+            </>}
+            {mode === "filtered_parallels" && <>
+              <FF label="颜色关键词（可选）"><Inp value={filterCond.color} onChange={v=>setFilterCond(f=>({...f,color:v}))} placeholder="如 Gold" /></FF>
+              <FF label="最大编号（可选）"><Inp value={filterCond.max_print_run} onChange={v=>setFilterCond(f=>({...f,max_print_run:v}))} placeholder="如 50（只看 /50 以下）" type="number" /></FF>
+            </>}
+            <button onClick={() => setStep("checklist")} disabled={!title} style={{ width:"100%", padding:"13px", borderRadius:12, border:"none", background: title ? `linear-gradient(135deg,${T.gold},${T.goldDark})` : T.s3, color: title ? "#000" : T.dim, fontSize:14, fontWeight:700, marginTop:8 }}>下一步：选择系列清单 →</button>
+          </div>
+        )}
+
+        {step === "checklist" && (
+          <div style={{ animation:"fadeUp 0.3s ease both" }}>
+            <div style={{ fontSize:16, fontWeight:600, color:T.text, marginBottom:4 }}>关联系列清单</div>
+            <div style={{ fontSize:12, color:T.muted, marginBottom:14 }}>选择已有清单，或让 AI 生成</div>
+            <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+              <input value={clSearch} onChange={e => { setClSearch(e.target.value); loadChecklists(e.target.value); }} placeholder="搜索或输入系列名，如 2021-22 Prizm..."
+                style={{ flex:1, padding:"10px 12px", border:`1px solid ${T.border}`, borderRadius:10, background:T.s3, color:T.text, fontSize:13, outline:"none" }}
+                onFocus={e=>e.target.style.borderColor=T.gold} onBlur={e=>e.target.style.borderColor=T.border} />
+              <button onClick={generateChecklist} disabled={!clSearch || generating} style={{ padding:"10px 14px", borderRadius:10, border:"none", background: clSearch ? T.gold : T.s3, color: clSearch ? "#000" : T.dim, fontSize:12, fontWeight:700, cursor: clSearch ? "pointer" : "not-allowed", flexShrink:0 }}>
+                {generating ? "..." : "✨ AI生成"}
+              </button>
+            </div>
+            {checklists.length === 0 && <div style={{ padding:"20px", textAlign:"center", color:T.dim, fontSize:12 }}>输入系列名后点"AI生成"，Claude 会生成完整平行清单</div>}
+            {checklists.map(cl => (
+              <div key={cl.id} onClick={() => setSelectedCL(cl)} style={{ padding:"12px 14px", borderRadius:12, border:`1px solid ${selectedCL?.id===cl.id?T.borderGold:T.border}`, background: selectedCL?.id===cl.id ? "rgba(200,168,75,0.08)" : T.s2, marginBottom:8, cursor:"pointer", transition:"all 0.2s" }}>
+                <div style={{ fontSize:13, fontWeight:600, color:T.text }}>{cl.set_name}</div>
+                <div style={{ fontSize:11, color:T.muted, marginTop:2 }}>{cl.subset||"Base"} · {cl.checklist_type==="parallels"?"平行版本清单":"球员名单"}</div>
+              </div>
+            ))}
+            {selectedCL && <button onClick={() => setStep("confirm")} style={{ width:"100%", padding:"13px", borderRadius:12, border:"none", background:`linear-gradient(135deg,${T.gold},${T.goldDark})`, color:"#000", fontSize:14, fontWeight:700, marginTop:8 }}>下一步：确认创建 →</button>}
+          </div>
+        )}
+
+        {step === "confirm" && (
+          <div style={{ animation:"fadeUp 0.3s ease both" }}>
+            <div style={{ fontSize:16, fontWeight:600, color:T.text, marginBottom:16 }}>确认创建</div>
+            <div style={{ background:T.s2, borderRadius:14, padding:16, marginBottom:16 }}>
+              {[
+                ["目标名称", title],
+                ["收集模式", { full_parallels:"🌈 彩虹全平行", full_players:"👥 子集全球员", filtered_parallels:"🎯 条件筛选" }[mode]],
+                playerName && ["球员", playerName],
+                ["系列清单", selectedCL?.set_name],
+                mode==="filtered_parallels" && filterCond.color && ["颜色筛选", filterCond.color],
+                mode==="filtered_parallels" && filterCond.max_print_run && ["最大编号", `/${filterCond.max_print_run}`],
+              ].filter(Boolean).map(([l,v],i)=>(
+                <div key={i} style={{ display:"flex", justifyContent:"space-between", padding:"9px 0", borderBottom:`1px solid ${T.border}` }}>
+                  <span style={{ fontSize:12, color:T.muted }}>{l}</span>
+                  <span style={{ fontSize:12, color:T.text, fontWeight:600 }}>{v}</span>
                 </div>
               ))}
             </div>
-          </div>
-        )}
-
-        {err && (
-          <div style={{ padding:"12px 14px", borderRadius:10, background:"rgba(212,80,80,0.08)", border:"1px solid rgba(212,80,80,0.2)", fontSize:12, color:T.red, marginBottom:16 }}>
-            ⚠️ {err}
-          </div>
-        )}
-
-        {result && (
-          <div style={{ animation:"fadeUp 0.4s ease both" }}>
-            {result.overallTip && (
-              <div style={{ padding:"14px 16px", borderRadius:14, background:`linear-gradient(135deg,rgba(200,168,75,0.1),rgba(200,168,75,0.04))`, border:`1px solid ${T.borderGold}`, marginBottom:16, fontSize:13, color:T.text, lineHeight:1.7 }}>
-                💡 {result.overallTip}
-              </div>
-            )}
-
-            {result.players?.map((player, pi) => (
-              <div key={pi} style={{ background:T.s2, borderRadius:16, overflow:"hidden", marginBottom:12 }}>
-                {/* Player header */}
-                <div onClick={()=>toggle(player.name)} style={{ padding:"14px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", cursor:"pointer" }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                    <span style={{ fontSize:28 }}>{pcP.find(p=>p.name===player.name)?.emoji||"🏀"}</span>
-                    <div>
-                      <div style={{ fontSize:15, fontWeight:600, color:T.text }}>{player.name}</div>
-                      <div style={{ fontSize:11, color:T.muted, marginTop:2 }}>收藏完整度 · <span style={{ color:T.gold, fontWeight:700 }}>{player.completeness}</span></div>
-                    </div>
-                  </div>
-                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                    <span style={{ fontSize:11, color:T.muted }}>{player.missing?.length||0} 项缺口</span>
-                    <span style={{ color:T.dim, fontSize:14 }}>{expanded[player.name]?"↑":"↓"}</span>
-                  </div>
-                </div>
-
-                {/* Completeness bar */}
-                <div style={{ height:2, background:T.s3, margin:"0 16px" }}>
-                  <div style={{ height:"100%", borderRadius:2, width:player.completeness, background:`linear-gradient(90deg,${T.gold},${T.goldLight})`, transition:"width 0.8s ease" }} />
-                </div>
-
-                {/* Missing cards */}
-                {expanded[player.name] && (
-                  <div style={{ padding:"12px 16px", animation:"fadeUp 0.3s ease both" }}>
-                    {player.tip && <p style={{ fontSize:12, color:T.muted, lineHeight:1.7, marginBottom:12, paddingBottom:12, borderBottom:`1px solid ${T.border}` }}>{player.tip}</p>}
-                    {player.missing?.map((item, ii) => (
-                      <div key={ii} style={{ display:"flex", gap:12, padding:"10px 0", borderBottom:ii<player.missing.length-1?`1px solid ${T.border}`:"none", alignItems:"flex-start" }}>
-                        <div style={{ width:32, height:32, borderRadius:8, background:`${PRIORITY_COLOR[item.priority]||T.muted}18`, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
-                          <span style={{ fontSize:10, fontWeight:700, color:PRIORITY_COLOR[item.priority]||T.muted }}>{item.priority}</span>
-                        </div>
-                        <div style={{ flex:1, minWidth:0 }}>
-                          <div style={{ fontSize:13, fontWeight:600, color:T.text, marginBottom:2 }}>{item.card}</div>
-                          <div style={{ fontSize:11, color:T.muted, lineHeight:1.5, marginBottom:4 }}>{item.reason}</div>
-                          {item.estimatedPrice && <span style={{ fontSize:10, color:T.gold, fontFamily:"monospace", fontWeight:700 }}>{item.estimatedPrice}</span>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
+            <div style={{ padding:"10px 14px", borderRadius:10, background:"rgba(200,168,75,0.06)", border:`1px solid ${T.borderGold}`, fontSize:12, color:T.muted, lineHeight:1.7, marginBottom:16 }}>
+              💡 创建后自动生成缺口监控条目。点"同步"可对比你的现有卡片更新已拥有状态。
+            </div>
+            <button onClick={save} disabled={saving} style={{ width:"100%", padding:"14px", borderRadius:14, border:"none", background: saving ? T.s3 : `linear-gradient(135deg,${T.gold},${T.goldDark})`, color: saving ? T.dim : "#000", fontSize:15, fontWeight:700 }}>
+              {saving ? "创建中..." : "✓ 创建目标"}
+            </button>
           </div>
         )}
       </div>
@@ -1307,15 +1334,15 @@ function TabBar() {
 function Router() {
   const {screen}=useApp();
   switch(screen){
-    case "home": return <HomeScreen />;
+    case "home":   return <HomeScreen />;
     case "search": return <SearchScreen />;
-    case "add": return <AddScreen />;
-    case "edit": return <EditScreen />;
-    case "pc": return <PCScreen />;
-    case "stats": return <StatsScreen />;
+    case "add":    return <AddScreen />;
+    case "edit":   return <EditScreen />;
+    case "pc":     return <PCScreen />;
+    case "stats":  return <StatsScreen />;
     case "detail": return <DetailScreen />;
     case "radar":  return <RadarScreen />;
-    default: return <HomeScreen />;
+    default:       return <HomeScreen />;
   }
 }
 
