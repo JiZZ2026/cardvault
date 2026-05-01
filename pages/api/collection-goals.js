@@ -221,10 +221,23 @@ tier: base=基础版 common=无编号平行 numbered=编号>50 premium=编号6-5
   const r = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 4096,
+    tools: [{ type: 'web_search_20250305', name: 'web_search' }],
     messages: [{ role: 'user', content: prompt }],
   });
-  const text = r.content[0].text.trim().replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
-  return JSON.parse(text);
+
+  // 从响应中提取文本（可能有多个 content block）
+  const textParts = r.content
+    .filter(block => block.type === 'text')
+    .map(block => block.text)
+    .join('\n');
+
+  const clean = textParts.trim().replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
+
+  // 提取 JSON 数组（可能混在其他文字中）
+  const jsonMatch = clean.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) throw new Error('AI未返回有效JSON: ' + clean.slice(0, 200));
+
+  return JSON.parse(jsonMatch[0]);
 }
 
 // ── 工具函数 ──────────────────────────────────────────────────────────────────
