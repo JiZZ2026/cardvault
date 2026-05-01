@@ -1230,7 +1230,7 @@ function NewGoalScreen({ pcP, onDone, onBack }) {
   const MODE_OPTIONS = [
     { id:"full_parallels", icon:"🌈", label:"彩虹全平行", desc:"一个球员×一个系列，收集所有平行版本" },
     { id:"full_players", icon:"👥", label:"子集全球员", desc:"一个子集（如NOTG），收集所有球员卡" },
-    { id:"filtered_parallels", icon:"🎯", label:"条件筛选", desc:"按颜色或编号范围筛选平行（如全部/50金折）" },
+    { id:"filtered_parallels", icon:"🎯", label:"条件筛选", desc:"按颜色或指定编号筛选（如所有 /50 的平行版本）" },
   ];
 
   return (
@@ -1264,8 +1264,8 @@ function NewGoalScreen({ pcP, onDone, onBack }) {
               <FF label="球员中文名"><Inp value={playerNameCn} onChange={setPlayerNameCn} placeholder="如 加内特" /></FF>
             </>}
             {mode === "filtered_parallels" && <>
-              <FF label="颜色关键词（可选）"><Inp value={filterCond.color} onChange={v=>setFilterCond(f=>({...f,color:v}))} placeholder="如 Gold" /></FF>
-              <FF label="最大编号（可选）"><Inp value={filterCond.max_print_run} onChange={v=>setFilterCond(f=>({...f,max_print_run:v}))} placeholder="如 50（只看 /50 以下）" type="number" /></FF>
+              <FF label="颜色筛选（可选，留空=所有颜色）"><Inp value={filterCond.color} onChange={v=>setFilterCond(f=>({...f,color:v}))} placeholder="如 Gold，留空则不限颜色" /></FF>
+              <FF label="指定编号（可选）"><Inp value={filterCond.max_print_run} onChange={v=>setFilterCond(f=>({...f,max_print_run:v}))} placeholder="如 50（精确匹配所有 /50 版本）" type="number" /></FF>
             </>}
             <button onClick={() => setStep("checklist")} disabled={!title} style={{ width:"100%", padding:"13px", borderRadius:12, border:"none", background: title ? `linear-gradient(135deg,${T.gold},${T.goldDark})` : T.s3, color: title ? "#000" : T.dim, fontSize:14, fontWeight:700, marginTop:8 }}>下一步：选择系列清单 →</button>
           </div>
@@ -1304,7 +1304,7 @@ function NewGoalScreen({ pcP, onDone, onBack }) {
                 playerName && ["球员", playerName],
                 ["系列清单", selectedCL?.set_name],
                 mode==="filtered_parallels" && filterCond.color && ["颜色筛选", filterCond.color],
-                mode==="filtered_parallels" && filterCond.max_print_run && ["最大编号", `/${filterCond.max_print_run}`],
+                mode==="filtered_parallels" && filterCond.max_print_run && ["指定编号", `/${filterCond.max_print_run}`],
               ].filter(Boolean).map(([l,v],i)=>(
                 <div key={i} style={{ display:"flex", justifyContent:"space-between", padding:"9px 0", borderBottom:`1px solid ${T.border}` }}>
                   <span style={{ fontSize:12, color:T.muted }}>{l}</span>
