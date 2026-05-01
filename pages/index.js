@@ -1037,8 +1037,8 @@ function RadarScreen() {
             {!hasResults && !scanning && (
               <div style={{ background:T.s2, borderRadius:16, padding:24, textAlign:"center" }}>
                 <div style={{ fontSize:40, marginBottom:12 }}>📡</div>
-                <div style={{ fontSize:14, color:T.text, marginBottom:6 }}>{goals.length === 0 ? "先创建收集目标" : "点击右上角"立即扫描""}</div>
-                <div style={{ fontSize:12, color:T.muted, lineHeight:1.7 }}>{goals.length === 0 ? "在"收集目标"页面定义你要找的卡，雷达会每天帮你盯着市场" : "扫描会搜索 eBay 上所有你缺口卡片的在售 listing"}</div>
+                <div style={{ fontSize:14, color:T.text, marginBottom:6 }}>{goals.length === 0 ? "先创建收集目标" : "点击右上角「立即扫描」"}</div>
+                <div style={{ fontSize:12, color:T.muted, lineHeight:1.7 }}>{goals.length === 0 ? "在「收集目标」页面定义你要找的卡，雷达会每天帮你盯着市场" : "扫描会搜索 eBay 上所有你缺口卡片的在售 listing"}</div>
                 {goals.length === 0 && <button onClick={() => setTab("goals")} style={{ marginTop:14, padding:"10px 20px", borderRadius:10, border:"none", background:T.gold, color:"#000", fontSize:13, fontWeight:700, cursor:"pointer" }}>去创建目标 →</button>}
               </div>
             )}
