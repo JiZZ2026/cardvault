@@ -1212,7 +1212,17 @@ function NewGoalScreen({ pcP, onDone, onBack }) {
       ...(filterCond.color ? { color:filterCond.color } : {}),
       ...(filterCond.max_print_run ? { max_print_run:parseInt(filterCond.max_print_run) } : {}),
     } : undefined;
-    const r = await apiCreateGoal({ title, mode, checklist_id:selectedCL.id, player_name:playerName||undefined, player_name_cn:playerNameCn||undefined, filter_condition:filter });
+    const r = await apiCreateGoal({
+      title, mode,
+      checklist_id: selectedCL.id,
+      set_name: selectedCL.set_name,
+      set_year: selectedCL.set_year,
+      brand: selectedCL.brand,
+      subset: selectedCL.subset,
+      player_name: playerName || undefined,
+      player_name_cn: playerNameCn || undefined,
+      filter_condition: filter,
+    });
     setSaving(false);
     if (r.success) onDone(); else setErr(r.error || "创建失败");
   };
