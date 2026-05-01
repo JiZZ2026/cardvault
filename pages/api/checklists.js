@@ -39,7 +39,7 @@ async function generateWithAI(set_name, set_year, brand, subset, checklist_type)
   const prompt = isParallels
     ? `你是球星卡专家。列出 "${set_name}" ${subset || 'Base'} 的所有平行版本。返回JSON数组，每项：{"name":"英文名","name_cn":"中文名","numbered":true/false,"print_run":编号数量或null,"tier":"common/numbered/premium/ultra/1of1"}。tier规则：common=无编号；numbered=编号>50；premium=编号≤50且>5；ultra=编号≤5且>1；1of1=1/1。只返回JSON数组。`
     : `你是球星卡专家。列出 "${set_name}" 系列 "${subset}" 子集的所有球员。返回JSON数组，每项：{"number":卡号数字,"name":"球员英文名","name_cn":"球员中文名","team":"球队"}。只返回JSON数组。`;
-  const response = await anthropic.messages.create({ model:'claude-sonnet-4-20250514', max_tokens:4096, messages:[{role:'user',content:prompt}] });
+  const response = await anthropic.messages.create({ model:'claude-sonnet-4-6', max_tokens:4096, messages:[{role:'user',content:prompt}] });
   const text = response.content[0].text.trim().replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
   return JSON.parse(text);
 }

@@ -219,7 +219,7 @@ tier: base=基础版 common=无编号平行 numbered=编号>50 premium=编号6-5
   }
 
   const r = await anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6',
     max_tokens: 4096,
     messages: [{ role: 'user', content: prompt }],
   });
