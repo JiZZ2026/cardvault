@@ -246,12 +246,19 @@ function matchesItem(card, item, mode) {
   if (mode === 'full_players') {
     return (card.player||'').toLowerCase().includes((item.name||'').toLowerCase().split(' ').pop());
   }
-  const cp = (card.parallel || card.variation || '').toLowerCase();
-  const iName = (item.name||'').toLowerCase();
-  const iCn = (item.name_cn||'').toLowerCase();
+  const cp = (card.parallel || card.variation || '').toLowerCase().trim();
+  if (!cp) return false;
+
+  const iName = (item.name||'').toLowerCase().trim();
+  const iCn = (item.name_cn||'').toLowerCase().trim();
+
+  // 匹配规则：卡片的 parallel 和清单的版本名，一方包含另一方即匹配
+  // 例："Gold Wave" 匹配 "Gold Wave Refractor"（后者包含前者）
+  // 例："Gold Shimmer Refractor" 不匹配 "Gold Wave"（互不包含）
   if (iName.length > 2 && cp.includes(iName)) return true;
-  if (iCn.length > 1 && cp.includes(iCn)) return true;
-  if (item.numbered && item.print_run && (card.numbered||'').includes(`/${item.print_run}`)) return true;
+  if (cp.length > 2 && iName.includes(cp)) return true;
+  if (iCn.length > 1 && (cp.includes(iCn) || iCn.includes(cp))) return true;
+
   return false;
 }
 
