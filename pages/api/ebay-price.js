@@ -7,9 +7,8 @@ export default async function handler(req, res) {
   const appId = process.env.EBAY_APP_ID;
   if (!appId) return res.status(500).json({ error: "eBay API 未配置" });
 
-  // Build search keyword
   const parts = [];
-  if (player) parts.push(player.trim().split(" ").slice(-1)[0]); // last name only
+  if (player) parts.push(player.trim().split(" ").slice(-1)[0]);
   if (year) parts.push(year);
   if (series) parts.push(series.replace(/\b(Basketball|NBA|Panini|Topps)\b/gi, "").trim());
   if (parallel) parts.push(parallel);
@@ -17,7 +16,6 @@ export default async function handler(req, res) {
   if (grade && grade !== "RAW") parts.push(grade);
   const keyword = customQuery || parts.filter(Boolean).join(" ");
 
-  // Build URL manually to avoid URLSearchParams encoding issues with parentheses
   const base = "https://svcs.ebay.com/services/search/FindingService/v1";
   const queryStr = [
     `OPERATION-NAME=findCompletedItems`,
@@ -31,30 +29,28 @@ export default async function handler(req, res) {
     `paginationInput.entriesPerPage=10`,
   ].join("&");
 
-  const url = `${base}?${queryStr}`;
-
   try {
-    const response = await fetch(url);
+    const response = await fetch(`${base}?${queryStr}`);
     const text = await response.text();
 
     let data;
     try {
       data = JSON.parse(text);
     } catch {
-      console.error("eBay non-JSON response:", text.slice(0, 500));
-      return res.status(500).json({ error: "eBay 返回了非JSON响应", detail: text.slice(0, 200) });
+      return res.status(500).json({ error: "eBay 返回非JSON响应", detail: text.slice(0, 300) });
     }
 
     const root = data?.findCompletedItemsResponse?.[0];
     if (!root) {
-      console.error("Unexpected eBay response shape:", JSON.stringify(data).slice(0, 500));
-      return res.status(500).json({ error: "eBay 响应格式异常", detail: JSON.stringify(data).slice(0, 200) });
+      // 把 eBay 实际返回的内容暴露出来，方便调试
+      const detail = JSON.stringify(data).slice(0, 400);
+      console.error("eBay unexpected shape:", detail);
+      return res.status(500).json({ error: "eBay 响应格式异常：" + detail, keyword });
     }
 
     const ack = root.ack?.[0];
     if (ack !== "Success") {
       const errMsg = root?.errorMessage?.[0]?.error?.[0]?.message?.[0] || `eBay ack: ${ack}`;
-      console.error("eBay API failure:", errMsg);
       return res.json({ success: false, error: errMsg, keyword });
     }
 
@@ -86,22 +82,19 @@ export default async function handler(req, res) {
     const median = sorted[Math.floor(sorted.length / 2)];
 
     return res.json({
-      success: true,
-      keyword,
-      totalFound,
+      success: true, keyword, totalFound,
       results: results.slice(0, 8),
       stats: {
-        count:    results.length,
-        avg:      Math.round(avg * 100) / 100,
-        min:      Math.round(min * 100) / 100,
-        max:      Math.round(max * 100) / 100,
-        median:   Math.round(median * 100) / 100,
+        count: results.length,
+        avg:    Math.round(avg * 100) / 100,
+        min:    Math.round(min * 100) / 100,
+        max:    Math.round(max * 100) / 100,
+        median: Math.round(median * 100) / 100,
         currency: results[0]?.currency || "USD",
       },
     });
 
   } catch (e) {
-    console.error("eBay fetch error:", e);
-    return res.status(500).json({ error: e.message || "查询失败" });
+    return res.status(500).json({ error: e.message || "查询失败", keyword });
   }
 }
