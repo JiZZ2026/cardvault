@@ -1139,39 +1139,85 @@ function GoalCard({ goal, onDelete, onSync }) {
   const doSync = async e => { e.stopPropagation(); setSyncing(true); await onSync(); setSyncing(false); };
   const pct = goal.progress_pct || 0;
   const missing = goal.missing_items || [];
+  const owned = goal.owned_items || [];
+  const isComplete = pct === 100;
 
   return (
-    <div style={{ background:T.s2, borderRadius:14, overflow:"hidden", marginBottom:10, border:`1px solid ${T.border}` }}>
+    <div style={{ background:T.s2, borderRadius:14, overflow:"hidden", marginBottom:10, border:`1px solid ${isComplete ? T.borderGold : T.border}` }}>
       <div onClick={() => setExpanded(e => !e)} style={{ padding:"14px", cursor:"pointer" }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
           <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ fontSize:14, fontWeight:600, color:T.text, marginBottom:3 }}>{goal.title}</div>
-            <div style={{ fontSize:11, color:T.muted }}>{goal.checklist?.set_name || "—"} · {goal.owned_count}/{goal.total_items} 已有 · <span style={{ color:T.orange }}>{goal.missing_count} 缺口</span></div>
+            <div style={{ fontSize:14, fontWeight:600, color:T.text, marginBottom:3 }}>
+              {isComplete && <span style={{ marginRight:6 }}>✅</span>}{goal.title}
+            </div>
+            <div style={{ fontSize:11, color:T.muted }}>
+              {goal.checklist?.set_name || "—"} · {goal.owned_count}/{goal.total_items} 已有 ·{" "}
+              {missing.length > 0
+                ? <span style={{ color:T.orange }}>{missing.length} 缺口</span>
+                : <span style={{ color:T.green }}>已集齐</span>}
+            </div>
           </div>
           <div style={{ display:"flex", gap:6, alignItems:"center", marginLeft:10 }}>
-            <button onClick={doSync} disabled={syncing} style={{ padding:"5px 10px", borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.blue, fontSize:11, cursor:"pointer" }}>{syncing ? "同步..." : "↻ 同步"}</button>
+            <button onClick={doSync} disabled={syncing} style={{ padding:"5px 10px", borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.blue, fontSize:11, cursor:"pointer" }}>
+              {syncing ? "同步..." : "↻ 同步"}
+            </button>
             <span style={{ fontSize:14, color:T.dim }}>{expanded ? "↑" : "↓"}</span>
           </div>
         </div>
         <div style={{ height:4, borderRadius:2, background:T.s3 }}>
-          <div style={{ height:"100%", borderRadius:2, width:`${pct}%`, background:`linear-gradient(90deg,${T.gold},${T.goldLight})`, transition:"width 0.6s ease" }} />
+          <div style={{ height:"100%", borderRadius:2, width:`${pct}%`, background: isComplete ? `linear-gradient(90deg,${T.green},${T.goldLight})` : `linear-gradient(90deg,${T.gold},${T.goldLight})`, transition:"width 0.6s ease" }} />
         </div>
         <div style={{ display:"flex", justifyContent:"space-between", marginTop:4 }}>
           <span style={{ fontSize:10, color:T.dim }}>收集进度</span>
-          <span style={{ fontSize:10, color:T.gold, fontFamily:"monospace", fontWeight:700 }}>{pct}%</span>
+          <span style={{ fontSize:10, color: isComplete ? T.green : T.gold, fontFamily:"monospace", fontWeight:700 }}>{pct}%</span>
         </div>
       </div>
-      {expanded && missing.length > 0 && (
-        <div style={{ borderTop:`1px solid ${T.border}`, padding:"10px 14px", maxHeight:260, overflowY:"auto" }}>
-          <div style={{ fontSize:10, color:T.dim, fontFamily:"'Space Mono',monospace", letterSpacing:1, marginBottom:8 }}>缺口清单（{missing.length} 项）</div>
-          <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
-            {missing.map((item, i) => (
-              <span key={i} style={{ padding:"4px 10px", borderRadius:20, fontSize:11, fontWeight:600, color:TIER_COLOR[item.tier]||T.muted, background:`${TIER_COLOR[item.tier]||T.muted}15`, border:`1px solid ${TIER_COLOR[item.tier]||T.muted}30` }}>
-                {item.name_cn || item.name}{item.numbered && item.print_run ? ` /${item.print_run}` : ""}
-              </span>
-            ))}
+
+      {/* 展开区域：始终渲染，不管缺口数量 */}
+      {expanded && (
+        <div style={{ borderTop:`1px solid ${T.border}`, padding:"10px 14px" }}>
+
+          {/* 缺口清单 */}
+          {missing.length > 0 && (
+            <div style={{ marginBottom:12 }}>
+              <div style={{ fontSize:10, color:T.dim, fontFamily:"'Space Mono',monospace", letterSpacing:1, marginBottom:8 }}>
+                缺口清单（{missing.length} 项）
+              </div>
+              <div style={{ display:"flex", flexWrap:"wrap", gap:6, maxHeight:160, overflowY:"auto" }}>
+                {missing.map((item, i) => (
+                  <span key={i} style={{ padding:"4px 10px", borderRadius:20, fontSize:11, fontWeight:600, color:TIER_COLOR[item.tier]||T.muted, background:`${TIER_COLOR[item.tier]||T.muted}15`, border:`1px solid ${TIER_COLOR[item.tier]||T.muted}30` }}>
+                    {item.name_cn || item.name}{item.numbered && item.print_run ? ` /${item.print_run}` : ""}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 已有清单（完成时展示） */}
+          {isComplete && owned.length > 0 && (
+            <div style={{ marginBottom:12 }}>
+              <div style={{ fontSize:10, color:T.dim, fontFamily:"'Space Mono',monospace", letterSpacing:1, marginBottom:8 }}>
+                已集齐（{owned.length} 项）
+              </div>
+              <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                {owned.map((item, i) => (
+                  <span key={i} style={{ padding:"4px 10px", borderRadius:20, fontSize:11, fontWeight:600, color:T.green, background:"rgba(48,209,88,0.1)", border:"1px solid rgba(48,209,88,0.25)" }}>
+                    {item.name_cn || item.name}{item.numbered && item.print_run ? ` /${item.print_run}` : ""}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 操作按钮 */}
+          <div style={{ display:"flex", gap:8, marginTop:4 }}>
+            <button onClick={doSync} disabled={syncing} style={{ flex:1, padding:"9px", borderRadius:10, border:`1px solid ${T.border}`, background:"transparent", color:T.blue, fontSize:12, cursor:"pointer" }}>
+              {syncing ? "同步中..." : "↻ 重新同步已有卡"}
+            </button>
+            <button onClick={() => { if (window.confirm(`删除目标「${goal.title}」？`)) onDelete(); }} style={{ flex:1, padding:"9px", borderRadius:10, border:"1px solid rgba(212,80,80,0.2)", background:"rgba(212,80,80,0.05)", color:T.red, fontSize:12, cursor:"pointer" }}>
+              🗑 删除目标
+            </button>
           </div>
-          <button onClick={() => { if (window.confirm(`删除目标"${goal.title}"？`)) onDelete(); }} style={{ width:"100%", marginTop:12, padding:"8px", borderRadius:10, border:"1px solid rgba(212,80,80,0.2)", background:"rgba(212,80,80,0.05)", color:T.red, fontSize:12, cursor:"pointer" }}>删除此目标</button>
         </div>
       )}
     </div>
