@@ -55,10 +55,21 @@ export default async function handler(req, res) {
     if (we) return res.status(500).json({ error: 'DB错误: ' + we.message });
 
     if (!watchItems?.length) {
-      return res.status(200).json({
-        success: true, scanned: 0, found: 0,
-        message: '没有活跃的监控条目，请先创建收集目标'
-      });
+      // watch_items 为空，尝试从 collection_goals 自动重建
+      const rebuilt = await rebuildWatchItems();
+      if (rebuilt === 0) {
+        return res.status(200).json({
+          success: true, scanned: 0, found: 0,
+          message: '没有活跃的监控条目，请先创建收集目标'
+        });
+      }
+      // 重新获取
+      const { data: reloaded } = await supabase
+        .from('watch_items').select('*').eq('status', 'active').limit(50);
+      if (!reloaded?.length) {
+        return res.status(200).json({ success: true, scanned: 0, found: 0, message: '监控条目重建失败，请重新同步目标' });
+      }
+      watchItems.push(...reloaded);
     }
 
     let scanned = 0, found = 0, errors = 0;
@@ -172,6 +183,52 @@ async function searchEbay(keyword) {
     listingType: item?.listingInfo?.[0]?.listingType?.[0] || 'Auction',
     endTime:     item?.listingInfo?.[0]?.endTime?.[0] || '',
   })).filter(r => r.price > 0);
+}
+
+// 从现有 goals 重建 watch_items
+async function rebuildWatchItems() {
+  const { data: goals } = await supabase
+    .from('collection_goals')
+    .select('*, checklist:checklists(set_name, set_year, brand)')
+    .eq('status', 'active');
+
+  if (!goals?.length) return 0;
+
+  let total = 0;
+  for (const goal of goals) {
+    const missing = goal.missing_items || [];
+    if (!missing.length) continue;
+
+    const cl = goal.checklist || {};
+    const items = missing.map(item => {
+      const playerLast = (goal.player_name || '').split(' ').pop();
+      const yearStart = (cl.set_year || '').split('-')[0];
+      const seriesKw = (cl.set_name || '').includes('Prizm') ? 'Prizm'
+        : (cl.set_name || '').includes('Chrome') ? 'Chrome' : (cl.brand || '');
+
+      const ebayKw = [playerLast, yearStart, seriesKw, item.name, item.print_run ? `/${item.print_run}` : '']
+        .filter(Boolean).join(' ');
+      const kataoKw = [goal.player_name_cn || playerLast, seriesKw.toLowerCase(), item.name_cn || item.name.toLowerCase(), item.print_run ? `/${item.print_run}` : '']
+        .filter(Boolean).join(' ');
+
+      return {
+        source: 'collection_goal',
+        goal_id: goal.id,
+        description: [playerLast, item.name_cn || item.name, item.print_run ? `/${item.print_run}` : ''].filter(Boolean).join(' '),
+        search_keywords_ebay: ebayKw,
+        search_keywords_katao: kataoKw,
+        tier: 'must_watch',
+        status: 'active',
+      };
+    });
+
+    for (let i = 0; i < items.length; i += 50) {
+      await supabase.from('watch_items').insert(items.slice(i, i + 50));
+    }
+    total += items.length;
+  }
+  console.log(`Rebuilt ${total} watch_items from ${goals.length} goals`);
+  return total;
 }
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
