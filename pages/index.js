@@ -1177,32 +1177,25 @@ function GoalCard({ goal, onDelete, onSync }) {
       {expanded && (
         <div style={{ borderTop:`1px solid ${T.border}`, padding:"10px 14px" }}>
 
-          {/* 缺口清单 */}
-          {missing.length > 0 && (
+          {/* 合并显示：已有（绿）+ 缺口（金/橙/红按稀有度），全部英文名 */}
+          {(owned.length > 0 || missing.length > 0) && (
             <div style={{ marginBottom:12 }}>
-              <div style={{ fontSize:10, color:T.dim, fontFamily:"'Space Mono',monospace", letterSpacing:1, marginBottom:8 }}>
-                缺口清单（{missing.length} 项）
+              <div style={{ display:"flex", gap:10, marginBottom:8, alignItems:"center" }}>
+                <span style={{ fontSize:10, color:T.dim, fontFamily:"'Space Mono',monospace", letterSpacing:1 }}>
+                  全部版本
+                </span>
+                <span style={{ fontSize:10, color:T.green }}>✓ {owned.length} 已有</span>
+                {missing.length > 0 && <span style={{ fontSize:10, color:T.orange }}>○ {missing.length} 缺口</span>}
               </div>
-              <div style={{ display:"flex", flexWrap:"wrap", gap:6, maxHeight:160, overflowY:"auto" }}>
-                {missing.map((item, i) => (
-                  <span key={i} style={{ padding:"4px 10px", borderRadius:20, fontSize:11, fontWeight:600, color:TIER_COLOR[item.tier]||T.muted, background:`${TIER_COLOR[item.tier]||T.muted}15`, border:`1px solid ${TIER_COLOR[item.tier]||T.muted}30` }}>
-                    {item.name_cn || item.name}{item.numbered && item.print_run ? ` /${item.print_run}` : ""}
+              <div style={{ display:"flex", flexWrap:"wrap", gap:6, maxHeight:200, overflowY:"auto" }}>
+                {owned.map((item, i) => (
+                  <span key={"o"+i} style={{ padding:"4px 10px", borderRadius:20, fontSize:11, fontWeight:600, color:"#000", background:T.green, opacity:0.9 }}>
+                    ✓ {item.name}{item.print_run ? ` /${item.print_run}` : ""}
                   </span>
                 ))}
-              </div>
-            </div>
-          )}
-
-          {/* 已有清单（完成时展示） */}
-          {isComplete && owned.length > 0 && (
-            <div style={{ marginBottom:12 }}>
-              <div style={{ fontSize:10, color:T.dim, fontFamily:"'Space Mono',monospace", letterSpacing:1, marginBottom:8 }}>
-                已集齐（{owned.length} 项）
-              </div>
-              <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
-                {owned.map((item, i) => (
-                  <span key={i} style={{ padding:"4px 10px", borderRadius:20, fontSize:11, fontWeight:600, color:T.green, background:"rgba(48,209,88,0.1)", border:"1px solid rgba(48,209,88,0.25)" }}>
-                    {item.name_cn || item.name}{item.numbered && item.print_run ? ` /${item.print_run}` : ""}
+                {missing.map((item, i) => (
+                  <span key={"m"+i} style={{ padding:"4px 10px", borderRadius:20, fontSize:11, fontWeight:600, color:TIER_COLOR[item.tier]||T.muted, background:`${TIER_COLOR[item.tier]||T.muted}15`, border:`1px solid ${TIER_COLOR[item.tier]||T.muted}40` }}>
+                    {item.name}{item.print_run ? ` /${item.print_run}` : ""}
                   </span>
                 ))}
               </div>
