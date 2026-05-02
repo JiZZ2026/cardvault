@@ -306,6 +306,11 @@ async function syncOwnedCards(goalId, res) {
   if (goal.player_name) conds.push(`player.ilike.%${goal.player_name}%`);
   if (goal.player_name_cn) conds.push(`player.ilike.%${goal.player_name_cn}%`);
   if (conds.length > 0) q = q.or(conds.join(','));
+  // 严格过滤年份：只拿该赛季的卡
+  if (cl.set_year) {
+    const yearStart = cl.set_year.split('-')[0];
+    q = q.ilike('year', `%${yearStart}%`);
+  }
   const { data: ownedCards } = await q;
 
   const owned = [], missing = [];
