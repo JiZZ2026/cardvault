@@ -175,6 +175,11 @@ const apiGetScanResults = async () => {
   const d = await r.json();
   return r.ok ? d : { mustWatch:[], niceToHave:[], lastScanned:null };
 };
+const apiAddWatchItem = async (body) => {
+  const r = await fetch("/api/watch-items", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
+  const d = await r.json();
+  return r.ok ? { success:true, data:d } : { success:false, error:d.error };
+};
 
 // ── Context ──────────────────────────────────────────────────────────────────
 const Ctx = createContext(null);
@@ -996,7 +1001,12 @@ function RadarScreen() {
   const runScan = async () => {
     setScanning(true); setScanErr(null);
     const r = await apiRadarScan();
-    if (r.success) await loadScanResults(); else setScanErr(r.error || "扫描失败");
+    if (r.success) {
+      await loadScanResults();
+      if (r.found === 0) setScanErr(r.message || "扫描完成，暂无匹配结果");
+    } else {
+      setScanErr(r.error || "扫描失败");
+    }
     setScanning(false);
   };
 
@@ -1030,7 +1040,14 @@ function RadarScreen() {
       </div>
 
       <div style={{ padding:"14px 16px" }}>
-        {scanErr && <div style={{ padding:"10px 14px", borderRadius:10, background:"rgba(212,80,80,0.08)", border:"1px solid rgba(212,80,80,0.2)", fontSize:12, color:T.red, marginBottom:14 }}>⚠️ {scanErr}</div>}
+        {scanErr && (
+          <div style={{ padding:"10px 14px", borderRadius:10,
+            background: scanErr.includes("完成") ? "rgba(255,159,10,0.08)" : "rgba(212,80,80,0.08)",
+            border: `1px solid ${scanErr.includes("完成") ? "rgba(255,159,10,0.3)" : "rgba(212,80,80,0.2)"}`,
+            fontSize:12, color: scanErr.includes("完成") ? T.orange : T.red, marginBottom:14 }}>
+            {scanErr.includes("完成") ? "📡 " : "⚠️ "}{scanErr}
+          </div>
+        )}
 
         {tab === "scan" && (
           <div style={{ animation:"fadeUp 0.3s ease both" }}>
@@ -1085,7 +1102,7 @@ function RadarScreen() {
                 <div style={{ fontSize:11, marginTop:4 }}>点上方按钮创建你的第一个目标</div>
               </div>
             )}
-            {goals.map(goal => <GoalCard key={goal.id} goal={goal} onDelete={async () => { await apiDeleteGoal(goal.id); loadGoals(); }} onSync={async () => { await apiSyncGoal(goal.id); loadGoals(); }} />)}
+            {goals.map(goal => <GoalCard key={goal.id} goal={goal} onDelete={async () => { await apiDeleteGoal(goal.id); loadGoals(); }} onSync={async () => { await apiSyncGoal(goal.id); loadGoals(); }} onRefresh={loadGoals} />)}
           </div>
         )}
       </div>
@@ -1132,9 +1149,26 @@ function ScanResultGroup({ group, fmtPrice, onDismiss }) {
   );
 }
 
-function GoalCard({ goal, onDelete, onSync }) {
+function GoalCard({ goal, onDelete, onSync, onRefresh }) {
   const [syncing, setSyncing] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [addName, setAddName] = useState("");
+  const [addKw, setAddKw] = useState("");
+  const [adding, setAdding] = useState(false);
+
+  const doAdd = async () => {
+    if (!addName.trim()) return;
+    setAdding(true);
+    await apiAddWatchItem({
+      goal_id: goal.id,
+      description: addName.trim(),
+      search_keywords_ebay: addKw.trim() || addName.trim(),
+      search_keywords_katao: addKw.trim() || addName.trim(),
+    });
+    setAddName(""); setAddKw(""); setShowAddForm(false); setAdding(false);
+    if (onRefresh) onRefresh();
+  };
   const TIER_COLOR = { common:T.muted, numbered:T.blue, premium:T.gold, ultra:T.orange, "1of1":T.red };
   const doSync = async e => { e.stopPropagation(); setSyncing(true); await onSync(); setSyncing(false); };
   const pct = goal.progress_pct || 0;
@@ -1202,13 +1236,39 @@ function GoalCard({ goal, onDelete, onSync }) {
             </div>
           )}
 
+          {/* 手动添加表单 */}
+          {showAddForm && (
+            <div style={{ marginBottom:10, padding:"10px 12px", borderRadius:10, background:T.s3, border:`1px solid ${T.borderGold}` }}>
+              <div style={{ fontSize:10, color:T.dim, fontFamily:"'Space Mono',monospace", marginBottom:8 }}>手动添加监控版本</div>
+              <input
+                value={addName} onChange={e => setAddName(e.target.value)}
+                placeholder="版本名称，如 Gold Cracked Ice /50"
+                style={{ width:"100%", padding:"8px 10px", border:`1px solid ${T.border}`, borderRadius:8, background:T.s2, color:T.text, fontSize:12, outline:"none", marginBottom:6 }}
+              />
+              <input
+                value={addKw} onChange={e => setAddKw(e.target.value)}
+                placeholder="eBay搜索词（留空自动用名称）"
+                style={{ width:"100%", padding:"8px 10px", border:`1px solid ${T.border}`, borderRadius:8, background:T.s2, color:T.text, fontSize:12, outline:"none", marginBottom:8 }}
+              />
+              <div style={{ display:"flex", gap:6 }}>
+                <button onClick={doAdd} disabled={adding||!addName.trim()} style={{ flex:1, padding:"8px", borderRadius:8, border:"none", background:addName.trim()?T.gold:T.s2, color:addName.trim()?"#000":T.dim, fontSize:12, fontWeight:700, cursor:"pointer" }}>
+                  {adding ? "添加中..." : "✓ 添加"}
+                </button>
+                <button onClick={() => { setShowAddForm(false); setAddName(""); setAddKw(""); }} style={{ padding:"8px 12px", borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.dim, fontSize:12, cursor:"pointer" }}>取消</button>
+              </div>
+            </div>
+          )}
+
           {/* 操作按钮 */}
           <div style={{ display:"flex", gap:8, marginTop:4 }}>
-            <button onClick={doSync} disabled={syncing} style={{ flex:1, padding:"9px", borderRadius:10, border:`1px solid ${T.border}`, background:"transparent", color:T.blue, fontSize:12, cursor:"pointer" }}>
-              {syncing ? "同步中..." : "↻ 重新同步已有卡"}
+            <button onClick={() => setShowAddForm(f => !f)} style={{ padding:"9px 12px", borderRadius:10, border:`1px solid ${T.borderGold}`, background:"rgba(200,168,75,0.06)", color:T.gold, fontSize:12, cursor:"pointer" }}>
+              + 手动添加
             </button>
-            <button onClick={() => { if (window.confirm(`删除目标「${goal.title}」？`)) onDelete(); }} style={{ flex:1, padding:"9px", borderRadius:10, border:"1px solid rgba(212,80,80,0.2)", background:"rgba(212,80,80,0.05)", color:T.red, fontSize:12, cursor:"pointer" }}>
-              🗑 删除目标
+            <button onClick={doSync} disabled={syncing} style={{ flex:1, padding:"9px", borderRadius:10, border:`1px solid ${T.border}`, background:"transparent", color:T.blue, fontSize:12, cursor:"pointer" }}>
+              {syncing ? "同步中..." : "↻ 同步"}
+            </button>
+            <button onClick={() => { if (window.confirm(`删除目标「${goal.title}」？`)) onDelete(); }} style={{ padding:"9px 12px", borderRadius:10, border:"1px solid rgba(212,80,80,0.2)", background:"rgba(212,80,80,0.05)", color:T.red, fontSize:12, cursor:"pointer" }}>
+              🗑
             </button>
           </div>
         </div>
