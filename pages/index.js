@@ -1001,12 +1001,10 @@ function RadarScreen() {
   const runScan = async () => {
     setScanning(true); setScanErr(null);
     const r = await apiRadarScan();
-    if (r.success) {
-      await loadScanResults();
-      if (r.found === 0) setScanErr(r.message || "扫描完成，暂无匹配结果");
-    } else {
-      setScanErr(r.error || "扫描失败");
-    }
+    await loadScanResults();
+    // 总是显示消息，帮助调试
+    if (r.message) setScanErr(r.message);
+    else if (!r.success) setScanErr(r.error || "扫描失败");
     setScanning(false);
   };
 
