@@ -165,8 +165,9 @@ const apiGenerateChecklist = async (body) => {
   const d = await r.json();
   return r.ok ? { success:true, data:d } : { success:false, error:d.error };
 };
-const apiRadarScan = async () => {
-  const r = await fetch("/api/radar-scan", { method:"POST" });
+const apiRadarScan = async (goal_id = null) => {
+  const body = goal_id ? { goal_id } : {};
+  const r = await fetch("/api/radar-scan", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
   const d = await r.json();
   return r.ok ? { success:true, ...d } : { success:false, error:d.error };
 };
@@ -1100,7 +1101,7 @@ function RadarScreen() {
                 <div style={{ fontSize:11, marginTop:4 }}>点上方按钮创建你的第一个目标</div>
               </div>
             )}
-            {goals.map(goal => <GoalCard key={goal.id} goal={goal} onDelete={async () => { await apiDeleteGoal(goal.id); loadGoals(); }} onSync={async () => { await apiSyncGoal(goal.id); loadGoals(); }} onRefresh={loadGoals} />)}
+            {goals.map(goal => <GoalCard key={goal.id} goal={goal} onDelete={async () => { await apiDeleteGoal(goal.id); loadGoals(); }} onSync={async () => { await apiSyncGoal(goal.id); loadGoals(); }} onRefresh={loadGoals} onScanDone={() => { loadScanResults(); setTab("scan"); }} />)}
           </div>
         )}
       </div>
@@ -1147,13 +1148,24 @@ function ScanResultGroup({ group, fmtPrice, onDismiss }) {
   );
 }
 
-function GoalCard({ goal, onDelete, onSync, onRefresh }) {
+function GoalCard({ goal, onDelete, onSync, onRefresh, onScanDone }) {
   const [syncing, setSyncing] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [scanMsg, setScanMsg] = useState("");
   const [expanded, setExpanded] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [addName, setAddName] = useState("");
   const [addKw, setAddKw] = useState("");
   const [adding, setAdding] = useState(false);
+
+  const doScan = async e => {
+    e.stopPropagation();
+    setScanning(true); setScanMsg("");
+    const r = await apiRadarScan(goal.id);
+    setScanMsg(r.message || (r.success ? "扫描完成" : r.error || "扫描失败"));
+    setScanning(false);
+    if (onScanDone) onScanDone();
+  };
 
   const doAdd = async () => {
     if (!addName.trim()) return;
@@ -1190,8 +1202,8 @@ function GoalCard({ goal, onDelete, onSync, onRefresh }) {
             </div>
           </div>
           <div style={{ display:"flex", gap:6, alignItems:"center", marginLeft:10 }}>
-            <button onClick={doSync} disabled={syncing} style={{ padding:"5px 10px", borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.blue, fontSize:11, cursor:"pointer" }}>
-              {syncing ? "同步..." : "↻ 同步"}
+            <button onClick={doScan} disabled={scanning || syncing} style={{ padding:"5px 10px", borderRadius:8, border:"none", background: scanning ? T.s3 : `linear-gradient(135deg,${T.gold},${T.goldDark})`, color: scanning ? T.dim : "#000", fontSize:11, fontWeight:700, cursor:"pointer" }}>
+              {scanning ? "扫描中..." : "🔍 扫描"}
             </button>
             <span style={{ fontSize:14, color:T.dim }}>{expanded ? "↑" : "↓"}</span>
           </div>
@@ -1254,6 +1266,16 @@ function GoalCard({ goal, onDelete, onSync, onRefresh }) {
                 </button>
                 <button onClick={() => { setShowAddForm(false); setAddName(""); setAddKw(""); }} style={{ padding:"8px 12px", borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.dim, fontSize:12, cursor:"pointer" }}>取消</button>
               </div>
+            </div>
+          )}
+
+          {/* 扫描消息 */}
+          {scanMsg && (
+            <div style={{ padding:"8px 12px", borderRadius:8, marginBottom:8,
+              background: scanMsg.includes("✅") ? "rgba(48,209,88,0.08)" : scanMsg.includes("失败") ? "rgba(212,80,80,0.08)" : "rgba(255,159,10,0.08)",
+              border: `1px solid ${scanMsg.includes("✅") ? "rgba(48,209,88,0.2)" : scanMsg.includes("失败") ? "rgba(212,80,80,0.2)" : "rgba(255,159,10,0.2)"}`,
+              fontSize:11, color: scanMsg.includes("✅") ? T.green : scanMsg.includes("失败") ? T.red : T.orange, lineHeight:1.6 }}>
+              {scanMsg}
             </div>
           )}
 
