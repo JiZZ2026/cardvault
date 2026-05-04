@@ -992,6 +992,7 @@ function RadarScreen() {
   const [scanning, setScanning] = useState(false);
   const [loadingGoals, setLoadingGoals] = useState(false);
   const [scanErr, setScanErr] = useState(null);
+  const [lastScanMsg, setLastScanMsg] = useState(null);
   const [showNewGoal, setShowNewGoal] = useState(false);
 
   useEffect(() => { loadScanResults(); loadGoals(); }, []);
@@ -999,13 +1000,13 @@ function RadarScreen() {
   const loadScanResults = async () => { const d = await apiGetScanResults(); setScanData(d); };
   const loadGoals = async () => { setLoadingGoals(true); const d = await apiGetGoals(); setGoals(d); setLoadingGoals(false); };
 
-  const runScan = async () => {
+  const runScan = async (goal_id = null) => {
     setScanning(true); setScanErr(null);
-    const r = await apiRadarScan();
+    const r = await apiRadarScan(goal_id);
     await loadScanResults();
-    // 总是显示消息，帮助调试
-    if (r.message) setScanErr(r.message);
-    else if (!r.success) setScanErr(r.error || "扫描失败");
+    const msg = r.message || (r.success ? "扫描完成" : r.error || "扫描失败");
+    setLastScanMsg(msg);
+    if (!r.success || r.found === 0) setScanErr(msg);
     setScanning(false);
   };
 
@@ -1050,6 +1051,17 @@ function RadarScreen() {
 
         {tab === "scan" && (
           <div style={{ animation:"fadeUp 0.3s ease both" }}>
+
+            {/* 最近一次扫描消息 */}
+            {lastScanMsg && !hasResults && (
+              <div style={{ padding:"12px 14px", borderRadius:12, marginBottom:14,
+                background: lastScanMsg.includes("✅") ? "rgba(48,209,88,0.08)" : "rgba(255,159,10,0.08)",
+                border: `1px solid ${lastScanMsg.includes("✅") ? "rgba(48,209,88,0.25)" : "rgba(255,159,10,0.25)"}`,
+                fontSize:12, color: lastScanMsg.includes("✅") ? T.green : T.orange, lineHeight:1.7 }}>
+                {lastScanMsg.includes("✅") ? "✅ " : "📡 "}{lastScanMsg}
+              </div>
+            )}
+
             {!hasResults && !scanning && (
               <div style={{ background:T.s2, borderRadius:16, padding:24, textAlign:"center" }}>
                 <div style={{ fontSize:40, marginBottom:12 }}>📡</div>
@@ -1101,7 +1113,7 @@ function RadarScreen() {
                 <div style={{ fontSize:11, marginTop:4 }}>点上方按钮创建你的第一个目标</div>
               </div>
             )}
-            {goals.map(goal => <GoalCard key={goal.id} goal={goal} onDelete={async () => { await apiDeleteGoal(goal.id); loadGoals(); }} onSync={async () => { await apiSyncGoal(goal.id); loadGoals(); }} onRefresh={loadGoals} onScanDone={() => { loadScanResults(); setTab("scan"); }} />)}
+            {goals.map(goal => <GoalCard key={goal.id} goal={goal} onDelete={async () => { await apiDeleteGoal(goal.id); loadGoals(); }} onSync={async () => { await apiSyncGoal(goal.id); loadGoals(); }} onRefresh={loadGoals} onScanDone={(msg) => { loadScanResults(); setLastScanMsg(msg); if (!msg?.includes("✅")) setScanErr(msg); setTab("scan"); }} />)}
           </div>
         )}
       </div>
@@ -1162,9 +1174,10 @@ function GoalCard({ goal, onDelete, onSync, onRefresh, onScanDone }) {
     e.stopPropagation();
     setScanning(true); setScanMsg("");
     const r = await apiRadarScan(goal.id);
-    setScanMsg(r.message || (r.success ? "扫描完成" : r.error || "扫描失败"));
+    const msg = r.message || (r.success ? "扫描完成" : r.error || "扫描失败");
+    setScanMsg(msg);
     setScanning(false);
-    if (onScanDone) onScanDone();
+    if (onScanDone) onScanDone(msg);
   };
 
   const doAdd = async () => {
