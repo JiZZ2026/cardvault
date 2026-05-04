@@ -1,16 +1,19 @@
 // pages/api/radar-scan.js
+// 雷达扫描 — 只用卡淘，eBay 不再用于盯梢
 
 import { supabase } from '../../lib/supabase';
 import { searchKatao } from './katao-search';
 
-const EBAY_APP_ID = process.env.EBAY_APP_ID;
-
 export default async function handler(req, res) {
 
+  // GET：返回最新扫描结果
   if (req.method === 'GET') {
     const { data, error } = await supabase
       .from('scan_results')
-      .select(`*, watch_item:watch_items(id, description, tier, search_keywords_ebay, search_keywords_katao, goal:collection_goals(id, title, player_name))`)
+      .select(`*, watch_item:watch_items(
+        id, description, tier, search_keywords_katao,
+        goal:collection_goals(id, title, player_name)
+      )`)
       .eq('dismissed', false)
       .order('scanned_at', { ascending: false })
       .limit(200);
@@ -32,143 +35,103 @@ export default async function handler(req, res) {
     });
   }
 
+  // POST：触发扫描
   if (req.method === 'POST') {
     const { goal_id } = req.body || {};
 
-    // ── Step 1: 获取 watch_items（可指定单个目标）────────────────────────────
+    // Step 1: 获取监控条目
     let watchItems = await getActiveWatchItems(goal_id || null);
 
     if (watchItems.length === 0 && !goal_id) {
-      // 全量扫描时，watch_items 为空则自动重建
       const rebuilt = await rebuildWatchItems();
       if (rebuilt === 0) {
-        return res.status(200).json({ success: false, scanned: 0, found: 0, message: '没有收集目标或缺口为空，请先创建收集目标' });
+        return res.status(200).json({
+          success: false, scanned: 0, found: 0,
+          message: '没有收集目标或缺口为空，请先创建收集目标',
+        });
       }
       watchItems = await getActiveWatchItems(null);
     }
 
     if (watchItems.length === 0) {
-      return res.status(200).json({ success: false, scanned: 0, found: 0, message: goal_id ? '该目标暂无缺口监控条目，请先同步' : '监控条目重建失败，请重新同步目标' });
+      return res.status(200).json({
+        success: false, scanned: 0, found: 0,
+        message: goal_id ? '该目标暂无缺口监控条目，请先同步' : '监控条目重建失败，请重新同步目标',
+      });
     }
 
-    // ── Step 2: 单目标扫全部，全量扫描每次只取 10 条 ─────────────────────────
-    const BATCH_SIZE = goal_id ? watchItems.length : 10;
-    const batchItems = watchItems.slice(0, BATCH_SIZE);
+    // Step 2: 单目标扫全部，全量扫描每次取前 20 条
+    const BATCH = goal_id ? watchItems.length : 20;
+    const batch = watchItems.slice(0, BATCH);
 
-    let ebayRateLimited = false;
-    let scanned = 0, found = 0, errors = 0;
+    let found = 0, scanned = 0, kataoFailed = false;
     const newResults = [];
-    const messages = [];
 
-    for (const item of batchItems) {
-      // ── 卡淘搜索（优先，不受限流影响）────────────────────────────────────────
-      const kataoKw = (item.search_keywords_katao || item.search_keywords_ebay || '').trim();
-      if (kataoKw) {
-        try {
-          const kataoResults = await searchKatao(kataoKw, false);
-          for (const r of kataoResults.slice(0, 5)) {
-            newResults.push({
-              watch_item_id: item.id,
-              platform: 'katao',
-              title: r.title,
-              price: r.price,
-              price_currency: 'RMB',
-              listing_url: r.url || '',
-              listing_type: 'auction',
-              is_new: true,
-              dismissed: false,
-            });
-          }
-          found += kataoResults.length;
-          if (kataoResults.length > 0) {
-            messages.push(`卡淘「${item.description}」: ${kataoResults.length} 条`);
-          }
-        } catch (e) {
-          // 卡淘失败不影响 eBay（可能是网络问题）
-          console.error(`卡淘搜索失败 "${kataoKw}":`, e.message);
+    for (const item of batch) {
+      const kw = (item.search_keywords_katao || '').trim();
+      if (!kw) continue;
+
+      scanned++;
+      try {
+        const results = await searchKatao(kw);
+        found += results.length;
+        for (const r of results.slice(0, 5)) {
+          newResults.push({
+            watch_item_id: item.id,
+            platform: 'katao',
+            title: r.title,
+            price: r.price,
+            price_currency: 'RMB',
+            listing_url: r.url || '',
+            listing_type: 'auction',
+            is_new: true,
+            dismissed: false,
+          });
         }
-      }
-
-      // ── eBay 搜索（遇限流立即停止）───────────────────────────────────────────
-      if (!ebayRateLimited && EBAY_APP_ID) {
-        const ebayKw = (item.search_keywords_ebay || '').trim();
-        if (ebayKw) {
-          try {
-            const ebayResults = await searchEbay(ebayKw);
-            scanned++;
-            for (const r of ebayResults.slice(0, 5)) {
-              newResults.push({
-                watch_item_id: item.id,
-                platform: 'ebay',
-                title: r.title,
-                price: r.price,
-                price_currency: r.currency || 'USD',
-                listing_url: r.url,
-                listing_type: r.listingType || 'Auction',
-                is_new: true,
-                dismissed: false,
-              });
-            }
-            found += ebayResults.length;
-          } catch (e) {
-            if (e.message.includes('超限') || e.message.includes('exceeded') || e.message.includes('RateLimit')) {
-              ebayRateLimited = true;
-              messages.push('eBay 今日调用次数超限，已停止 eBay 搜索，卡淘搜索继续');
-            } else {
-              errors++;
-              console.error(`eBay搜索失败 "${ebayKw}":`, e.message);
-            }
-          }
-          await sleep(1000); // eBay 之间间隔 1 秒，比之前的 300ms 更保守
+      } catch (e) {
+        kataoFailed = true;
+        console.error(`卡淘搜索失败 "${kw}":`, e.message);
+        // 如果是网络错误（Vercel 访问不到卡淘），提前终止
+        if (e.message.includes('超时') || e.message.includes('fetch') || e.name === 'AbortError') {
+          return res.status(200).json({
+            success: false, scanned, found: 0,
+            message: `卡淘访问失败（可能被 Vercel 服务器屏蔽）：${e.message}\n请查看 /api/katao-debug?keyword=加内特+prizm 确认网络连通性`,
+          });
         }
       }
 
       await supabase.from('watch_items')
         .update({ last_scanned: new Date().toISOString() })
         .eq('id', item.id);
+
+      await sleep(500);
     }
 
-    // ── Step 3: 写入结果 ──────────────────────────────────────────────────────
+    // Step 3: 写入结果
     if (newResults.length > 0) {
       await supabase.from('scan_results')
-        .delete()
-        .in('watch_item_id', batchItems.map(i => i.id));
+        .delete().in('watch_item_id', batch.map(i => i.id));
       await supabase.from('scan_results').insert(newResults);
     }
 
-    // ── Step 4: 汇总消息 ──────────────────────────────────────────────────────
-    const remaining = watchItems.length - BATCH_SIZE;
-    let summary;
+    const remaining = watchItems.length - BATCH;
+    let message;
     if (found > 0) {
-      summary = `✅ 找到 ${found} 个结果（本批 ${batchItems.length} 条）${remaining > 0 ? `，还有 ${remaining} 条待下次扫描` : ''}`;
-    } else if (ebayRateLimited) {
-      summary = `卡淘已扫描 ${batchItems.length} 条，eBay 超限暂停。${found === 0 ? '暂无匹配在售卡片' : ''}`;
+      message = `✅ 找到 ${found} 个结果（扫描了 ${scanned} 条）${remaining > 0 ? `，还有 ${remaining} 条待下次扫描` : ''}`;
     } else {
-      summary = `扫描完成（本批 ${batchItems.length} 条）：eBay + 卡淘均暂无匹配结果`;
+      message = `扫描完成（${scanned} 条）：卡淘暂无匹配在售卡片${remaining > 0 ? `，还有 ${remaining} 条待下次` : ''}`;
     }
 
-    if (messages.length > 0) summary += '\n' + messages.join('\n');
-
-    return res.status(200).json({
-      success: true,
-      scanned,
-      found,
-      errors,
-      total_watch_items: watchItems.length,
-      ebay_rate_limited: ebayRateLimited,
-      message: summary,
-    });
+    return res.status(200).json({ success: true, scanned, found, message });
   }
 
   return res.status(405).json({ error: 'Method not allowed' });
 }
 
-// ── 工具函数 ──────────────────────────────────────────────────────────────────
-
 async function getActiveWatchItems(goal_id = null) {
   let q = supabase.from('watch_items').select('*').eq('status', 'active');
   if (goal_id) q = q.eq('goal_id', goal_id);
-  q = q.limit(goal_id ? 200 : 50); // 单目标不限条数
+  q = q.limit(goal_id ? 200 : 50);
   const { data, error } = await q;
   if (error) { console.error('getActiveWatchItems:', error.message); return []; }
   return data || [];
@@ -181,8 +144,8 @@ async function rebuildWatchItems() {
     .eq('status', 'active');
 
   if (!goals?.length) return 0;
-
   let total = 0;
+
   for (const goal of goals) {
     const missing = goal.missing_items || [];
     if (!missing.length) continue;
@@ -190,24 +153,27 @@ async function rebuildWatchItems() {
     const cl = goal.checklist || {};
     const playerLast = (goal.player_name || '').split(' ').pop() || '';
     const playerCn   = goal.player_name_cn || playerLast;
-    const yearStart  = (cl.set_year || '').split('-')[0] || '';
+    const yearStr    = (cl.set_year || '').replace('-', '-').split('-').join('-');
     const setName    = cl.set_name || '';
-    const seriesEn   = setName.includes('Prizm') ? 'Prizm'
-                     : setName.includes('Chrome') ? 'Chrome'
-                     : setName.includes('Select') ? 'Select'
-                     : (cl.brand || '');
-    const seriesCn   = seriesEn.toLowerCase();
+    const seriesCn   = setName.toLowerCase().includes('prizm') ? 'prizm'
+                     : setName.toLowerCase().includes('chrome') ? 'chrome'
+                     : setName.toLowerCase().includes('select') ? 'select'
+                     : (cl.brand || '').toLowerCase();
 
     const items = missing.map(item => {
-      const name   = item.name || '';
-      const nameCn = item.name_cn || name.toLowerCase();
+      const nameCn = item.name_cn || item.name || '';
       const numStr = item.print_run ? `/${item.print_run}` : '';
+      // 卡淘搜索词：中文球员名 + 系列 + 版本中文名 + 编号 + 年份
+      const kataoKw = [playerCn, seriesCn, nameCn, numStr, yearStr]
+        .filter(Boolean).join(' ').trim();
+      const desc = [playerLast, item.name || nameCn, numStr].filter(Boolean).join(' ');
+
       return {
         source: 'collection_goal',
         goal_id: goal.id,
-        description: [playerLast, name, numStr].filter(Boolean).join(' '),
-        search_keywords_ebay:  [playerLast, yearStart, seriesEn, name, numStr].filter(Boolean).join(' '),
-        search_keywords_katao: [playerCn, seriesCn, nameCn, numStr].filter(Boolean).join(' '),
+        description: desc,
+        search_keywords_ebay: [playerLast, (cl.set_year||'').split('-')[0], seriesCn, item.name||'', numStr].filter(Boolean).join(' '),
+        search_keywords_katao: kataoKw,
         tier: 'must_watch',
         status: 'active',
       };
@@ -219,57 +185,6 @@ async function rebuildWatchItems() {
     }
   }
   return total;
-}
-
-async function searchEbay(keyword) {
-  const params = [
-    'OPERATION-NAME=findItemsByKeywords',
-    'SERVICE-VERSION=1.0.0',
-    `SECURITY-APPNAME=${encodeURIComponent(EBAY_APP_ID)}`,
-    'RESPONSE-DATA-FORMAT=JSON',
-    `keywords=${encodeURIComponent(keyword)}`,
-    'itemFilter%280%29.name=ListingType',
-    'itemFilter%280%29.value%280%29=Auction',
-    'itemFilter%280%29.value%281%29=AuctionWithBIN',
-    'itemFilter%280%29.value%282%29=FixedPrice',
-    'categoryId=214',
-    'sortOrder=EndTimeSoonest',
-    'paginationInput.entriesPerPage=8',
-  ].join('&');
-
-  const resp = await fetch(`https://svcs.ebay.com/services/search/FindingService/v1?${params}`);
-  const text = await resp.text();
-  let data;
-  try { data = JSON.parse(text); } catch { throw new Error('eBay非JSON响应'); }
-
-  const root = data?.findItemsByKeywordsResponse?.[0];
-  if (!root) {
-    const topErr = data?.errorMessage?.[0]?.error?.[0];
-    if (topErr) {
-      const eid = topErr.errorId?.[0];
-      const emsg = topErr.message?.[0] || '';
-      if (eid === '10001' || emsg.includes('exceeded')) throw new Error('eBay API 今日调用次数超限');
-      throw new Error(`eBay错误 ${eid}: ${emsg}`);
-    }
-    throw new Error('eBay响应结构异常');
-  }
-
-  const ack = root.ack?.[0];
-  if (ack !== 'Success') {
-    const errMsg = root?.errorMessage?.[0]?.error?.[0]?.message?.[0] || `ack=${ack}`;
-    if (errMsg.includes('exceeded') || errMsg.includes('RateLimit')) throw new Error('eBay API 今日调用次数超限');
-    throw new Error(errMsg);
-  }
-
-  const items = root?.searchResult?.[0]?.item || [];
-  return items.map(item => ({
-    title:       item?.title?.[0] || '',
-    price:       parseFloat(item?.sellingStatus?.[0]?.currentPrice?.[0]?.['__value__'] || '0'),
-    currency:    item?.sellingStatus?.[0]?.currentPrice?.[0]?.['@currencyId'] || 'USD',
-    url:         item?.viewItemURL?.[0] || '',
-    listingType: item?.listingInfo?.[0]?.listingType?.[0] || 'Auction',
-    endTime:     item?.listingInfo?.[0]?.endTime?.[0] || '',
-  })).filter(r => r.price > 0);
 }
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
