@@ -161,3 +161,22 @@ function detectBrand(series) {
   if (s.includes('upper deck')) return 'Upper Deck';
   return '';
 }
+
+// 从 Claude 响应（含 web_search）中可靠提取 JSON 数组
+function extractJsonArray(response) {
+  const textBlocks = response.content.filter(b => b.type === 'text').map(b => b.text);
+  for (const text of textBlocks) {
+    const clean = text.trim().replace(/```json
+?/g, '').replace(/```
+?/g, '').trim();
+    const matches = [...clean.matchAll(/\[[\s\S]*?\]/g)];
+    const candidates = matches
+      .map(m => { try { const p = JSON.parse(m[0]); return Array.isArray(p) ? { arr: p } : null; } catch { return null; } })
+      .filter(Boolean)
+      .sort((a, b) => b.arr.length - a.arr.length);
+    const valid = candidates.find(c => c.arr.length > 0 && c.arr[0]?.name);
+    if (valid) return valid.arr;
+  }
+  const preview = textBlocks.join('\n').slice(0, 300);
+  throw new Error('AI未返回有效JSON数组。预览: ' + preview);
+}
