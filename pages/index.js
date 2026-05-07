@@ -1122,35 +1122,62 @@ function RadarScreen() {
 }
 
 function ScanResultGroup({ group, fmtPrice, onDismiss }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true); // 默认展开
   const wi = group.watch_item;
   const results = group.results || [];
   const best = results[0];
+  const bestPrice = best ? (best.price_currency === 'RMB' ? `¥${Number(best.price).toFixed(0)}` : `$${Number(best.price).toFixed(0)}`) : null;
 
   return (
-    <div style={{ background:T.s2, borderRadius:14, overflow:"hidden", marginBottom:10, border:`1px solid ${T.border}` }}>
+    <div style={{ background:T.s2, borderRadius:14, overflow:"hidden", marginBottom:12, border:`1px solid ${T.border}` }}>
+      {/* 头部 */}
       <div onClick={() => setExpanded(e => !e)} style={{ padding:"12px 14px", cursor:"pointer" }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
           <div style={{ flex:1, minWidth:0 }}>
             <div style={{ fontSize:13, fontWeight:600, color:T.text, marginBottom:3 }}>{wi?.description}</div>
-            <div style={{ fontSize:11, color:T.muted }}>来自：{wi?.goal?.title || "—"} · {results.length} 个结果</div>
+            <div style={{ fontSize:11, color:T.muted }}>
+              {wi?.goal?.title || "—"} · {results.length} 个结果
+              {best?.platform === 'katao' && <span style={{ marginLeft:6, color:T.blue, fontWeight:600 }}>卡淘</span>}
+            </div>
           </div>
           <div style={{ textAlign:"right", flexShrink:0, marginLeft:10 }}>
-            {best && <div style={{ fontSize:13, fontWeight:700, color:T.green, fontFamily:"monospace" }}>${Number(best.price).toFixed(0)}</div>}
+            {bestPrice && <div style={{ fontSize:14, fontWeight:700, color:T.green }}>{bestPrice}</div>}
             <div style={{ fontSize:10, color:T.dim, marginTop:2 }}>{expanded ? "↑" : "↓"}</div>
           </div>
         </div>
       </div>
+
+      {/* 展开：卡片列表 */}
       {expanded && (
         <div style={{ borderTop:`1px solid ${T.border}` }}>
           {results.map((r, i) => (
-            <div key={r.id} style={{ display:"flex", gap:10, padding:"10px 14px", borderBottom: i < results.length - 1 ? `1px solid ${T.border}` : "none", alignItems:"flex-start" }}>
+            <div key={r.id || i} style={{ display:"flex", gap:10, padding:"10px 14px", borderBottom: i < results.length - 1 ? `1px solid ${T.border}` : "none" }}>
+              {/* 缩略图 */}
+              {r.image_url && (
+                <div style={{ width:52, height:72, borderRadius:6, overflow:"hidden", flexShrink:0, background:"#000" }}>
+                  <img src={r.image_url} alt="" style={{ width:"100%", height:"100%", objectFit:"contain" }} />
+                </div>
+              )}
+              {/* 信息 */}
               <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ fontSize:12, color:T.text, lineHeight:1.4, marginBottom:4, overflow:"hidden", display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical" }}>{r.title}</div>
-                <div style={{ fontSize:12, fontWeight:700, color:T.gold, fontFamily:"monospace" }}>{fmtPrice(r.price, r.price_currency)}</div>
+                <div style={{ fontSize:12, color:T.text, lineHeight:1.45, marginBottom:5, overflow:"hidden", display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical" }}>{r.title}</div>
+                <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+                  <span style={{ fontSize:13, fontWeight:700, color:T.gold }}>
+                    {r.price_currency === 'RMB' ? `¥${Number(r.price).toLocaleString('zh-CN')}` : `$${Number(r.price).toFixed(0)}`}
+                  </span>
+                  {r.listing_type === 'auction' && r.bid_count > 0 &&
+                    <span style={{ fontSize:10, color:T.muted }}>{r.bid_count}次竞价</span>}
+                  {r.time_remaining &&
+                    <span style={{ fontSize:10, color: r.time_remaining.includes('分') ? T.red : T.muted }}>⏱ {r.time_remaining}</span>}
+                  {r.platform === 'katao' &&
+                    <span style={{ fontSize:9, fontWeight:700, color:T.blue, background:"rgba(10,132,255,0.1)", padding:"2px 6px", borderRadius:4 }}>卡淘</span>}
+                </div>
               </div>
-              <div style={{ display:"flex", flexDirection:"column", gap:6, flexShrink:0 }}>
-                <a href={r.listing_url} target="_blank" rel="noreferrer" style={{ padding:"5px 10px", borderRadius:8, background:T.gold, color:"#000", fontSize:11, fontWeight:700, textDecoration:"none", textAlign:"center" }}>查看</a>
+              {/* 查看按钮 */}
+              <div style={{ flexShrink:0, alignSelf:"center" }}>
+                {r.listing_url
+                  ? <a href={r.listing_url} target="_blank" rel="noreferrer" style={{ display:"block", padding:"7px 12px", borderRadius:8, background:`linear-gradient(135deg,${T.gold},${T.goldDark})`, color:"#000", fontSize:11, fontWeight:700, textDecoration:"none" }}>查看</a>
+                  : <span style={{ fontSize:10, color:T.dim }}>无链接</span>}
               </div>
             </div>
           ))}
