@@ -1,11 +1,9 @@
 // pages/api/katao-search.js
-// 调用卡淘真实 API 接口搜索在售卡片
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
   const { keyword } = req.body;
   if (!keyword) return res.status(400).json({ error: '缺少 keyword' });
-
   try {
     const results = await searchKatao(keyword);
     return res.status(200).json({ success: true, keyword, results, total: results.length });
@@ -14,20 +12,22 @@ export default async function handler(req, res) {
   }
 }
 
-export async function searchKatao(keyword) {
-  // searchJson: Status=1 在售中
-  const searchJson = JSON.stringify([{ Key: 'Status', Value: 1 }]);
-  const params = new URLSearchParams({
-    userId: '',
-    pageIndex: '1',
-    pageSize: '20',
-    searchKey: keyword,
-    searchJson,
-    sort: 'EffectiveTimeStamp',
-    sortType: 'asc',
-  });
+export async function searchKatao(keyword, sold = false) {
+  // 手动构建 URL，保持 [ ] { } 不编码（与浏览器行为一致）
+  // 卡淘服务器对 searchJson 的解析要求方括号不被 %5B%5D 编码
+  const searchJsonRaw = '[{"Key":"Status","Value":' + (sold ? '-2' : '1') + '}]';
+  const keywordEncoded = encodeURIComponent(keyword);
+  const searchJsonEncoded = searchJsonRaw
+    .replace(/"/g, '%22'); // 只编码双引号，保留 [ ] { } : ,
 
-  const url = `https://www.cardhobby.com.cn/NewCommodity/SearchCommodity?${params}`;
+  const url = 'https://www.cardhobby.com.cn/NewCommodity/SearchCommodity'
+    + '?userId='
+    + '&pageIndex=1'
+    + '&pageSize=20'
+    + '&searchKey=' + keywordEncoded
+    + '&searchJson=' + searchJsonEncoded
+    + '&sort=EffectiveTimeStamp'
+    + '&sortType=asc';
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000);
@@ -51,35 +51,29 @@ export async function searchKatao(keyword) {
     clearTimeout(timeout);
   }
 
-  if (data?.result !== 1) {
-    throw new Error('卡淘返回错误: ' + (data?.msg || JSON.stringify(data)));
+  if (!data || data.result !== 1) {
+    throw new Error('卡淘返回错误: ' + (data && data.msg ? data.msg : JSON.stringify(data).slice(0, 100)));
   }
 
-  const items = data?.data?.PagedMarketItemList || [];
+  const items = (data.data && data.data.PagedMarketItemList) ? data.data.PagedMarketItemList : [];
 
   return items.map(item => {
-    // 构建商品链接
-    const url = `https://www.cardhobby.com.cn/Market/Details/${item.ID}`;
-    // 价格：LowestPrice 是实际当前价（拍卖最低出价）
     const price = item.LowestPrice || parseFloat(item.Price) || 0;
     const priceUSD = item.USD_LowestPrice ? parseFloat(item.USD_LowestPrice) : null;
-    // 剩余时间
     const timeLeft = item.EffectiveDate ? calcTimeLeft(item.EffectiveDate) : '';
-    // 拍卖方式：ByWay=2 是竞拍，1 是一口价
     const listingType = item.ByWay === 2 ? 'auction' : 'buy_now';
-
     return {
       id: item.ID,
       title: item.Title,
-      image: item.TitImg,
+      image: item.TitImg || null,
       price,
       priceUSD,
       currency: 'RMB',
-      url,
+      url: 'https://www.cardhobby.com.cn/Market/Details/' + item.ID,
       bidCount: item.PriceCount || 0,
       timeLeft,
       listingType,
-      seller: item.SellRealName,
+      seller: item.SellRealName || '',
       isGuarantee: item.IsGuarantee === 1,
       platform: 'katao',
     };
@@ -89,14 +83,13 @@ export async function searchKatao(keyword) {
 function calcTimeLeft(dateStr) {
   try {
     const end = new Date(dateStr);
-    const now = new Date();
-    const diff = end - now;
+    const diff = end - Date.now();
     if (diff <= 0) return '已结束';
     const days = Math.floor(diff / 86400000);
     const hours = Math.floor((diff % 86400000) / 3600000);
     const mins = Math.floor((diff % 3600000) / 60000);
-    if (days > 0) return `${days}天${hours}时`;
-    if (hours > 0) return `${hours}时${mins}分`;
-    return `${mins}分钟`;
-  } catch { return ''; }
+    if (days > 0) return days + '天' + hours + '时';
+    if (hours > 0) return hours + '时' + mins + '分';
+    return mins + '分钟';
+  } catch (e) { return ''; }
 }
