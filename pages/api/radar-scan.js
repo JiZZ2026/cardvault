@@ -156,26 +156,28 @@ async function rebuildWatchItems() {
     const cl = goal.checklist || {};
     const playerLast = (goal.player_name || '').split(' ').pop() || '';
     const playerCn   = goal.player_name_cn || playerLast;
-    const yearStr    = (cl.set_year || '').replace('-', '-').split('-').join('-');
+    const yearStart  = (cl.set_year || '').split('-')[0] || '';
+    const yearShort  = (cl.set_year || '').slice(2).replace(/^(\d{2})-\d{2,4}$/, (m, y1) => { const parts = (cl.set_year||'').split('-'); return parts[0].slice(2) + '-' + (parts[1]||'').slice(-2); }) || yearStart;
     const setName    = cl.set_name || '';
-    const seriesCn   = setName.toLowerCase().includes('prizm') ? 'prizm'
-                     : setName.toLowerCase().includes('chrome') ? 'chrome'
-                     : setName.toLowerCase().includes('select') ? 'select'
-                     : (cl.brand || '').toLowerCase();
+    const seriesEn   = setName.includes('Prizm') ? 'Prizm' : setName.includes('Chrome') ? 'Chrome' : setName.includes('Select') ? 'Select' : (cl.brand || '');
+    const seriesCn   = seriesEn.toLowerCase();
 
     const items = missing.map(item => {
-      const nameCn = item.name_cn || item.name || '';
-      const numStr = item.print_run ? `/${item.print_run}` : '';
-      // 卡淘搜索词：中文球员名 + 系列 + 版本中文名 + 编号 + 年份
-      const kataoKw = [playerCn, seriesCn, nameCn, numStr, yearStr]
-        .filter(Boolean).join(' ').trim();
-      const desc = [playerLast, item.name || nameCn, numStr].filter(Boolean).join(' ');
+      const nameCn = item.name_cn || '';
+      const nameEn = item.name || '';
+      const numStr = item.print_run ? ('/' + item.print_run) : '';
+      // 卡淘：中文名+系列+中文平行名+编号+短年份
+      const kataoParts = [playerCn, seriesCn, nameCn || nameEn.toLowerCase(), numStr, yearShort].filter(Boolean);
+      const kataoKw = kataoParts.join(' ').trim();
+      // eBay：姓+年份+系列英文+平行英文+编号
+      const ebayKw = [playerLast, yearStart, seriesEn, nameEn, numStr].filter(Boolean).join(' ');
+      const desc = [playerLast, nameCn || nameEn, numStr].filter(Boolean).join(' ');
 
       return {
         source: 'collection_goal',
         goal_id: goal.id,
         description: desc,
-        search_keywords_ebay: [playerLast, (cl.set_year||'').split('-')[0], seriesCn, item.name||'', numStr].filter(Boolean).join(' '),
+        search_keywords_ebay: ebayKw,
         search_keywords_katao: kataoKw,
         tier: 'must_watch',
         status: 'active',
