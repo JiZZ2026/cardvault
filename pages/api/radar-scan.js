@@ -83,7 +83,10 @@ export default async function handler(req, res) {
             price: r.price,
             price_currency: 'RMB',
             listing_url: r.url || '',
-            listing_type: 'auction',
+            image_url: r.image || null,
+            listing_type: r.listingType || 'auction',
+            bid_count: r.bidCount || 0,
+            time_remaining: r.timeLeft || '',
             is_new: true,
             dismissed: false,
           });
