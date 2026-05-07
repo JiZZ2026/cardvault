@@ -176,6 +176,18 @@ const apiGetScanResults = async () => {
   const d = await r.json();
   return r.ok ? d : { mustWatch:[], niceToHave:[], lastScanned:null };
 };
+const apiGetParallels = async (series, year, numbered) => {
+  if (!series) return null;
+  try {
+    const r = await fetch('/api/find-parallels', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ series, year, numbered: numbered || null })
+    });
+    const d = await r.json();
+    return r.ok ? d : null;
+  } catch { return null; }
+};
+
 const apiAddWatchItem = async (body) => {
   const r = await fetch("/api/watch-items", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
   const d = await r.json();
@@ -302,6 +314,115 @@ function Tog({label,value,onChange}) { return <div style={{display:"flex",alignI
 
 const EMPTY = () => ({ player:"",team:"",year:"",series:"",manufacturer:"",card_number:"",parallel:"",numbered:"",is_one_of_one:false,sub_series:"",is_rc:false,grade:"RAW",grade_company:"",grade_score:"",category:"PC",status:"holding",price_currency:"RMB",buy_price:"",buy_date:"",sell_price:"",sell_date:"",source:"",location:"",notes:"",tags:[] });
 
+// 智能平行版本选择器
+function ParallelPicker({ value, onChange, series, year, numbered }) {
+  const [options, setOptions] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [searched, setSearched] = useState('');
+  const [totalCount, setTotalCount] = useState(0);
+  const [filteredByRun, setFilteredByRun] = useState(null);
+  const [mode, setMode] = useState('select'); // 'select' | 'manual'
+
+  // numbered 变化时也要重新查
+  const seriesKey = `${series}__${year}__${numbered||''}`;
+
+  useEffect(() => {
+    if (!series || series.length < 3) return;
+    if (seriesKey === searched) return;
+    setLoading(true);
+    setOptions([]);
+    apiGetParallels(series, year, numbered).then(d => {
+      if (d?.parallels?.length) {
+        setOptions(d.parallels);
+        setTotalCount(d.total_parallels || d.parallels.length);
+        setFilteredByRun(d.filtered_by_print_run || null);
+        setSearched(seriesKey);
+      }
+      setLoading(false);
+    });
+  }, [seriesKey]);
+
+  const TIER_COLOR = { common: T.muted, numbered: T.blue, premium: T.gold, ultra: T.orange, '1of1': T.red };
+
+  if (mode === 'manual') {
+    return (
+      <FF label="平行类型">
+        <div style={{ display:'flex', gap:6 }}>
+          <Inp value={value} onChange={onChange} placeholder="手动输入平行类型" />
+          {options.length > 0 &&
+            <button onClick={() => setMode('select')} style={{ padding:'8px 10px', borderRadius:8, border:`1px solid ${T.borderGold}`, background:'rgba(200,168,75,0.08)', color:T.gold, fontSize:11, cursor:'pointer', flexShrink:0, whiteSpace:'nowrap' }}>
+              从列表选
+            </button>}
+        </div>
+      </FF>
+    );
+  }
+
+  return (
+    <FF label="平行类型">
+      <div style={{ position:'relative' }}>
+        {/* 主选择框 */}
+        <div onClick={() => !loading && options.length > 0 && setShowDropdown(d => !d)}
+          style={{ display:'flex', alignItems:'center', gap:8, padding:'10px 12px', border:`1px solid ${showDropdown ? T.gold : T.border}`, borderRadius:8, background:T.s3, cursor: options.length > 0 ? 'pointer' : 'default', minHeight:40 }}>
+          {loading
+            ? <span style={{ fontSize:12, color:T.dim, display:'flex', alignItems:'center', gap:6 }}><span style={{ animation:'pulse 1s ease infinite' }}>✨</span> 正在查询平行清单...</span>
+            : value
+              ? <span style={{ fontSize:13, color:T.text, flex:1 }}>{value}</span>
+              : options.length > 0
+                ? <span style={{ fontSize:13, color:T.dim, flex:1 }}>点击选择平行版本</span>
+                : <span style={{ fontSize:13, color:T.dim, flex:1 }}>填写系列后自动加载</span>}
+          {options.length > 0 && !loading && <span style={{ color:T.gold, fontSize:11 }}>{showDropdown ? '▲' : '▼'} {options.length}种</span>}
+          {value && <button onClick={e => { e.stopPropagation(); onChange(''); }} style={{ background:'none', border:'none', color:T.dim, fontSize:14, cursor:'pointer', padding:'0 2px' }}>✕</button>}
+        </div>
+
+        {/* 下拉列表 */}
+        {showDropdown && options.length > 0 && (
+          <div style={{ position:'absolute', top:'calc(100% + 4px)', left:0, right:0, background:T.s2, border:`1px solid ${T.borderGold}`, borderRadius:10, zIndex:50, maxHeight:260, overflowY:'auto', boxShadow:'0 8px 32px rgba(0,0,0,0.5)' }}>
+            {/* 分组显示 */}
+            {['common','numbered','premium','ultra','1of1'].map(tier => {
+              const group = options.filter(o => o.tier === tier);
+              if (!group.length) return null;
+              const tierLabel = { common:'无编号', numbered:'有编号 >50', premium:'编号 /6-50', ultra:'编号 /2-5', '1of1':'限量 1/1' }[tier];
+              return (
+                <div key={tier}>
+                  <div style={{ padding:'6px 12px 3px', fontSize:9, color:T.dim, fontFamily:"'Space Mono',monospace", letterSpacing:1, background:T.s3 }}>{tierLabel}</div>
+                  {group.map((opt, i) => (
+                    <div key={i} onClick={() => { onChange(opt.value); setShowDropdown(false); }}
+                      style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'9px 14px', cursor:'pointer', borderBottom:`1px solid ${T.border}` }}
+                      onMouseEnter={e => e.currentTarget.style.background = T.s3}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                      <div>
+                        <span style={{ fontSize:13, color:T.text }}>{opt.name}</span>
+                        {opt.name_cn && <span style={{ fontSize:11, color:T.muted, marginLeft:6 }}>{opt.name_cn}</span>}
+                      </div>
+                      {opt.print_run && <span style={{ fontSize:11, fontWeight:700, color:TIER_COLOR[tier]||T.muted, fontFamily:'monospace' }}>/{opt.print_run}</span>}
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* 底部操作 */}
+        <div style={{ display:'flex', justifyContent:'space-between', marginTop:5 }}>
+          {options.length > 0 && !loading
+            ? <span style={{ fontSize:10, color:T.dim }}>
+                来自官方 checklist ·{' '}
+                {filteredByRun
+                  ? <span style={{ color:T.gold }}>/{filteredByRun} 编号 {options.length} 种</span>
+                  : `${options.length} 种版本`}
+                {filteredByRun && totalCount > options.length && <span style={{ color:T.dim }}> (共{totalCount}种)</span>}
+              </span>
+            : <span style={{ fontSize:10, color:T.dim }}></span>}
+          <button onClick={() => setMode('manual')} style={{ background:'none', border:'none', color:T.dim, fontSize:10, cursor:'pointer', padding:0 }}>手动输入</button>
+        </div>
+      </div>
+    </FF>
+  );
+}
+
 function CardFormFields({form,set,tab,setTab}) {
   const sym = form.price_currency==="USD"?"$":"¥";
   return <>
@@ -319,7 +440,13 @@ function CardFormFields({form,set,tab,setTab}) {
       </div>
       <FF label="系列" required><Inp value={form.series} onChange={set("series")} placeholder="如 Topps Chrome" /></FF>
       <FF label="厂商"><Sl value={form.manufacturer} onChange={set("manufacturer")} options={[["","选择"],["Topps","Topps"],["Panini","Panini"],["Upper Deck","Upper Deck"],["其他","其他"]]} /></FF>
-      <FF label="平行类型"><Inp value={form.parallel} onChange={set("parallel")} placeholder="如 Gold Geometric Refractor" /></FF>
+      <ParallelPicker
+        value={form.parallel}
+        onChange={set("parallel")}
+        series={form.series}
+        year={form.year}
+        numbered={form.numbered}
+      />
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
         <FF label="编号"><Inp value={form.numbered} onChange={set("numbered")} placeholder="/50" /></FF>
         <FF label="子系列"><Inp value={form.sub_series} onChange={set("sub_series")} placeholder="City Edition" /></FF>
