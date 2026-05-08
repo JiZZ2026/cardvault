@@ -8,8 +8,7 @@ export default async function handler(req, res) {
     + '?userId=&pageIndex=1&pageSize=20'
     + '&searchKey=' + encodeURIComponent(keyword)
     + '&searchJson=' + searchJsonEncoded
-    + '&sort=EffectiveTimeStamp&sortType=asc';
-
+    + '&sort=EffectiveTimeStamp&sortType=desc';
   try {
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 10000);
