@@ -156,22 +156,31 @@ async function rebuildWatchItems() {
     const cl = goal.checklist || {};
     const playerLast = (goal.player_name || '').split(' ').pop() || '';
     const playerCn   = goal.player_name_cn || playerLast;
-    const yearStart  = (cl.set_year || '').split('-')[0] || '';
-    const yearShort  = (cl.set_year || '').slice(2).replace(/^(\d{2})-\d{2,4}$/, (m, y1) => { const parts = (cl.set_year||'').split('-'); return parts[0].slice(2) + '-' + (parts[1]||'').slice(-2); }) || yearStart;
     const setName    = cl.set_name || '';
-    const seriesEn   = setName.includes('Prizm') ? 'Prizm' : setName.includes('Chrome') ? 'Chrome' : setName.includes('Select') ? 'Select' : (cl.brand || '');
+    const yearParts  = (cl.set_year || '').split('-');
+    const yearShort  = yearParts.length >= 2
+      ? yearParts[0].slice(-2) + '-' + yearParts[1].slice(-2)
+      : yearParts[0] || '';
+    const seriesEn   = setName.includes('Prizm') ? 'Prizm'
+      : setName.includes('Chrome') ? 'Chrome'
+      : setName.includes('Select') ? 'Select'
+      : (cl.brand || '');
     const seriesCn   = seriesEn.toLowerCase();
+    const yearStart  = yearParts[0] || '';
 
     const items = missing.map(item => {
-      const nameCn = item.name_cn || '';
       const nameEn = item.name || '';
       const numStr = item.print_run ? ('/' + item.print_run) : '';
-      // 卡淘：中文名+系列+中文平行名+编号+短年份
-      const kataoParts = [playerCn, seriesCn, nameCn || nameEn.toLowerCase(), numStr, yearShort].filter(Boolean);
-      const kataoKw = kataoParts.join(' ').trim();
-      // eBay：姓+年份+系列英文+平行英文+编号
+
+      // 卡淘：越简洁越好
+      // 有编号：中文名 + 短年份 + 系列 + /编号   e.g. 加内特 20-21 prizm /10
+      // 无编号：中文名 + 短年份 + 系列            e.g. 加内特 20-21 prizm
+      const kataoKw = [playerCn, yearShort, seriesCn, numStr].filter(Boolean).join(' ').trim();
+
+      // eBay：姓 + 年份 + 系列英文 + 平行英文 + 编号
       const ebayKw = [playerLast, yearStart, seriesEn, nameEn, numStr].filter(Boolean).join(' ');
-      const desc = [playerLast, nameCn || nameEn, numStr].filter(Boolean).join(' ');
+
+      const desc = [playerLast, nameEn, numStr].filter(Boolean).join(' ');
 
       return {
         source: 'collection_goal',
