@@ -56,12 +56,14 @@ async function fetchCardPrice(keyword) {
 export default async function handler(req, res) {
   // 安全校验：Vercel Cron会带 Authorization header；手动调试时跳过
   const authHeader = req.headers.authorization;
-  if (
-    process.env.NODE_ENV === 'production' &&
-    authHeader !== `Bearer ${process.env.CRON_SECRET}`
-  ) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+  const querySecret = req.query.secret;
+if (
+  process.env.NODE_ENV === 'production' &&
+  authHeader !== `Bearer ${process.env.CRON_SECRET}` &&
+  querySecret !== process.env.CRON_SECRET
+) {
+  return res.status(401).json({ error: 'Unauthorized' });
+}
 
   try {
     const lines = [];
