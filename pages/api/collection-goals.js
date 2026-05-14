@@ -55,26 +55,34 @@ export default async function handler(req, res) {
         if (existing) checklist = existing;
       }
       if (!checklist) {
-        const { data: existing } = await supabase.from('checklists').select('*')
-          .ilike('set_name', '%' + set_name + '%').eq('subset', subset || 'Base').maybeSingle();
-        if (existing) checklist = existing;
+        // 优先查 Full（多子集完整版），其次查指定 subset
+        const subsetOptions = mode === 'full_parallels'
+          ? ['Full', subset || 'Base']
+          : [subset || 'Base', 'Full'];
+        for (const s of subsetOptions) {
+          const { data: existing } = await supabase.from('checklists').select('*')
+            .ilike('set_name', '%' + set_name + '%').eq('subset', s).maybeSingle();
+          if (existing) { checklist = existing; break; }
+        }
       }
       if (!checklist) {
         let generated;
         try { generated = await generateChecklistWithAI(set_name, set_year, brand, subset, mode, null); }
         catch (e) { return res.status(500).json({ error: 'AI生成清单失败: ' + e.message }); }
+        // full_parallels 存为 'Full'，其他存为具体 subset
+        const subsetLabel = mode === 'full_parallels' ? 'Full' : (subset || 'Base');
         const { data: newCL, error: clErr } = await supabase.from('checklists')
-          .insert([{ set_name, set_year: set_year || '', brand: brand || '', subset: subset || 'Base', checklist_type: mode === 'full_players' ? 'player_set' : 'parallels', items: generated }])
+          .insert([{ set_name, set_year: set_year || '', brand: brand || '', subset: subsetLabel, checklist_type: mode === 'full_players' ? 'player_set' : 'parallels', items: generated }])
           .select().single();
         if (clErr) return res.status(500).json({ error: '清单保存失败: ' + clErr.message });
         checklist = newCL;
       }
     }
 
-    // ── 2. 确定监控条目（不过滤任何 tier，Silver 等无编号平行必须保留）───
+    // ── 2. 全部 items，不过滤任何 tier ───────────────────────────────────
     const allItems = checklist.items || [];
 
-    // ── 3. 比对已有卡片（严格匹配年份+系列）─────────────────────────────
+    // ── 3. 比对已有卡片 ───────────────────────────────────────────────────
     const owned = [];
     const missing = [];
 
@@ -128,7 +136,7 @@ export default async function handler(req, res) {
   return res.status(405).json({ error: 'Method not allowed' });
 }
 
-// ── 查询已拥有的卡（严格匹配年份+系列）─────────────────────────────────────
+// ── 查询已拥有的卡 ────────────────────────────────────────────────────────────
 async function queryOwnedCards(player_name, player_name_cn, checklist) {
   const conds = [];
   if (player_name) conds.push('player.ilike.%' + player_name + '%');
@@ -192,7 +200,6 @@ async function generateWatchItems(goalId, goal, missingItems, checklist) {
   const playerCn = goal.player_name_cn || playerLast;
 
   const setYear = cl.set_year || '';
-  // 年份简写：2020-21 → 20-21
   const yearShort = setYear.replace(/^20(\d{2})-(\d{2,4}).*$/, '$1-$2');
   const yearStart = setYear.split('-')[0];
 
@@ -208,14 +215,11 @@ async function generateWatchItems(goalId, goal, missingItems, checklist) {
     const name = item.name || '';
     const numStr = item.print_run ? ('/' + item.print_run) : '';
 
-    // 卡淘关键词：越简洁越好，不加平行名
+    // 卡淘：越简洁越好，不加平行名
     // 有编号：加内特 20-21 prizm /10
     // 无编号：加内特 20-21 prizm
     const kataoKw = [playerCn, yearShort, seriesCn, numStr].filter(Boolean).join(' ').trim();
-
-    // eBay：姓 + 年份 + 系列英文 + 平行英文 + 编号
     const ebayKw = [playerLast, yearStart, seriesEn, name, numStr].filter(Boolean).join(' ');
-
     const desc = [playerLast, name, numStr].filter(Boolean).join(' ');
 
     return {
@@ -262,26 +266,19 @@ async function syncOwnedCards(goalId, res) {
   return res.status(200).json({ ...data, owned_count: owned.filter(i => i.owned).length, missing_count: missing.length });
 }
 
-// ── AI 生成清单 ───────────────────────────────────────────────────────────────
-function applyFilter(items, cond) {
-  return items.filter(item => {
-    if (cond.color) {
-      const c = cond.color.toLowerCase();
-      if (!item.name.toLowerCase().includes(c) && !(item.name_cn || '').includes(cond.color)) return false;
-    }
-    if (cond.max_print_run !== undefined) {
-      if (!item.numbered || item.print_run === null) return false;
-      if (item.print_run > cond.max_print_run) return false;
-    }
-    return true;
-  });
-}
-
+// ── AI 生成清单入口 ───────────────────────────────────────────────────────────
 async function generateChecklistWithAI(set_name, set_year, brand, subset, mode, filter_condition) {
-  let prompt;
+  if (mode === 'full_parallels') {
+    return await generateAllSubsetParallels(set_name, set_year);
+  }
+
   if (mode === 'full_players') {
-    prompt = '你是球星卡专家。完整列出 "' + set_name + '" 系列 "' + (subset || 'Base') + '" 子集的所有球员名单。返回纯JSON数组，每项：{"number":卡号整数,"name":"球员英文全名","name_cn":"球员中文名","team":"球队英文名"}。只返回JSON数组。';
-  } else if (mode === 'filtered_parallels' && filter_condition) {
+    const prompt = '你是球星卡专家。完整列出 "' + set_name + '" 系列 "' + (subset || 'Base') + '" 子集的所有球员名单。返回纯JSON数组，每项：{"number":卡号整数,"name":"球员英文全名","name_cn":"球员中文名","team":"球队英文名"}。只返回JSON数组。';
+    const r = await anthropic.messages.create({ model: 'claude-sonnet-4-6', max_tokens: 4096, tools: [{ type: 'web_search_20250305', name: 'web_search' }], messages: [{ role: 'user', content: prompt }] });
+    return extractJsonArray(r);
+  }
+
+  if (mode === 'filtered_parallels' && filter_condition) {
     const fc = filter_condition;
     const printRun = fc.max_print_run ? parseInt(fc.max_print_run) : null;
     const color = fc.color || null;
@@ -290,39 +287,87 @@ async function generateChecklistWithAI(set_name, set_year, brand, subset, mode, 
     else if (printRun) condDesc = '编号恰好为 /' + printRun + ' 的所有平行版本（不限颜色）';
     else if (color) condDesc = '颜色含"' + color + '"的所有平行版本';
     else condDesc = '所有平行版本';
-    prompt = '你是球星卡专家。列出 "' + set_name + '"（' + (set_year || '') + '赛季）中，' + condDesc + '。务必穷举所有变体。' + (printRun ? '只列编号恰好是 /' + printRun + ' 的版本。' : '') + '返回纯JSON数组，每项：{"name":"版本英文名","name_cn":"版本中文名","numbered":true,"print_run":' + (printRun || '编号数量') + ',"tier":"common/numbered/premium/ultra/1of1"}。只返回JSON数组。';
-  } else {
-    // full_parallels 或 默认
-    prompt = `你是球星卡专家。完整列出 "${set_name}"（${set_year || ''}赛季）所有平行折射版本，必须覆盖所有子集。
+    const prompt = '你是球星卡专家。列出 "' + set_name + '"（' + (set_year || '') + '赛季）中，' + condDesc + '。务必穷举所有变体。' + (printRun ? '只列编号恰好是 /' + printRun + ' 的版本。' : '') + '返回纯JSON数组，每项：{"name":"版本英文名","name_cn":"版本中文名","numbered":true,"print_run":' + (printRun || '编号数量') + ',"tier":"common/numbered/premium/ultra/1of1"}。只返回JSON数组。';
+    const r = await anthropic.messages.create({ model: 'claude-sonnet-4-6', max_tokens: 4096, tools: [{ type: 'web_search_20250305', name: 'web_search' }], messages: [{ role: 'user', content: prompt }] });
+    return extractJsonArray(r);
+  }
 
-对于 Prizm / Select / Mosaic 等多子集产品，请分别列出：
-- Base Set 全部平行（含 Silver 等无编号版本）
-- Choice 独占平行（如有）
-- Fast Break 独占平行（如有）
-- 其他子集（如有）
+  // fallback
+  return await generateAllSubsetParallels(set_name, set_year);
+}
+
+// ── 两步法：先查子集列表，再逐个生成 ─────────────────────────────────────────
+async function generateAllSubsetParallels(set_name, set_year) {
+  // Step 1: 发现该产品的所有子集
+  let subsets = ['Base Set'];
+  try {
+    const r1 = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 800,
+      tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+      messages: [{
+        role: 'user',
+        content: `"${set_name}"（${set_year || ''}赛季）这套球星卡有哪些产品子集？例如 Base Set、Choice、Fast Break、Concourse、Premiere Level、Stained Glass 等。请搜索后只返回JSON字符串数组，格式：["Base Set","Choice","Fast Break"]，不加任何说明文字。`,
+      }],
+    });
+    const texts1 = r1.content.filter(b => b.type === 'text').map(b => b.text);
+    for (const t of texts1) {
+      const m = t.match(/\[[\s\S]*?\]/);
+      if (m) {
+        try {
+          const parsed = JSON.parse(m[0]);
+          if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === 'string') {
+            subsets = parsed;
+            break;
+          }
+        } catch (e) { /* 继续尝试下一个 match */ }
+      }
+    }
+  } catch (e) {
+    console.error('[Step1] 查询子集失败，降级为 Base Set:', e.message);
+  }
+
+  console.log(`[generateAllSubsetParallels] ${set_name} 发现子集:`, subsets);
+
+  // Step 2: 对每个子集单独生成平行清单
+  const allItems = [];
+  for (const subsetName of subsets) {
+    try {
+      const r2 = await anthropic.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 4096,
+        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        messages: [{
+          role: 'user',
+          content: `你是球星卡专家。完整列出 "${set_name}"（${set_year || ''}赛季）"${subsetName}" 子集的所有平行版本，务必穷举不遗漏。
 
 重要规则：
 - "name" 字段只写平行颜色/类型本身，不含品牌前缀（写 "Silver" 不写 "Prizm Silver"，写 "Gold" 不写 "Prizm Gold"）
-- Silver / Holo 等无编号基础平行必须包含，tier 为 "common"
-- SSP 版本需标注 ssp: true
+- 无编号版本（如 Silver、Holo）必须包含，tier 为 "common"
+- 如有 SSP/SP 短印版本，标注 "ssp": true
 
 返回纯JSON数组，每项格式：
-{"name":"版本英文名","name_cn":"版本中文名","numbered":true或false,"print_run":编号数量或null,"tier":"common/numbered/premium/ultra/1of1","subset":"Base/Choice/Fast Break等","ssp":false}
+{"name":"版本英文名","name_cn":"版本中文名","numbered":true或false,"print_run":编号数量或null,"tier":"common/numbered/premium/ultra/1of1","subset":"${subsetName}","ssp":false}
 
 tier定义：common=无编号  numbered=编号>50  premium=编号6-50  ultra=编号2-5  1of1=限量1
-只返回JSON数组，不加任何说明文字。`;
+只返回JSON数组，不加任何说明文字。`,
+        }],
+      });
+
+      const items = extractJsonArray(r2);
+      items.forEach(item => { if (!item.subset) item.subset = subsetName; });
+      allItems.push(...items);
+      console.log(`[generateAllSubsetParallels] ${subsetName}: ${items.length} 条`);
+    } catch (e) {
+      console.error(`[generateAllSubsetParallels] 子集 "${subsetName}" 生成失败:`, e.message);
+    }
   }
 
-  const r = await anthropic.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 4096,
-    tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-    messages: [{ role: 'user', content: prompt }],
-  });
-
-  return extractJsonArray(r);
+  if (allItems.length === 0) throw new Error('所有子集生成均失败，请重试');
+  return allItems;
 }
 
+// ── 提取 JSON 数组 ────────────────────────────────────────────────────────────
 function extractJsonArray(response) {
   const textBlocks = response.content.filter(b => b.type === 'text').map(b => b.text);
   for (const text of textBlocks) {
