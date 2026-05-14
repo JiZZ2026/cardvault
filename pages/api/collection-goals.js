@@ -50,26 +50,31 @@ export default async function handler(req, res) {
       if (clErr) return res.status(500).json({ error: '清单保存失败: ' + clErr.message });
       checklist = newCL;
     } else {
+      // 优先用指定 checklist_id
       if (checklist_id) {
         const { data: existing } = await supabase.from('checklists').select('*').eq('id', checklist_id).maybeSingle();
         if (existing) checklist = existing;
       }
+
       if (!checklist) {
-        // 优先查 Full（多子集完整版），其次查指定 subset
-        const subsetOptions = mode === 'full_parallels'
-          ? ['Full', subset || 'Base']
-          : [subset || 'Base', 'Full'];
-        for (const s of subsetOptions) {
+        if (mode === 'full_parallels') {
+          // full_parallels 只接受 'Full' 子集，绝不复用 'Base'（Base 是不完整的单子集清单）
           const { data: existing } = await supabase.from('checklists').select('*')
-            .ilike('set_name', '%' + set_name + '%').eq('subset', s).maybeSingle();
-          if (existing) { checklist = existing; break; }
+            .ilike('set_name', '%' + set_name + '%').eq('subset', 'Full').maybeSingle();
+          if (existing) checklist = existing;
+        } else {
+          // 其他模式：先找指定 subset，再找 Full
+          const subsetToFind = subset || 'Base';
+          const { data: existing } = await supabase.from('checklists').select('*')
+            .ilike('set_name', '%' + set_name + '%').eq('subset', subsetToFind).maybeSingle();
+          if (existing) checklist = existing;
         }
       }
+
       if (!checklist) {
         let generated;
         try { generated = await generateChecklistWithAI(set_name, set_year, brand, subset, mode, null); }
         catch (e) { return res.status(500).json({ error: 'AI生成清单失败: ' + e.message }); }
-        // full_parallels 存为 'Full'，其他存为具体 subset
         const subsetLabel = mode === 'full_parallels' ? 'Full' : (subset || 'Base');
         const { data: newCL, error: clErr } = await supabase.from('checklists')
           .insert([{ set_name, set_year: set_year || '', brand: brand || '', subset: subsetLabel, checklist_type: mode === 'full_players' ? 'player_set' : 'parallels', items: generated }])
@@ -292,11 +297,10 @@ async function generateChecklistWithAI(set_name, set_year, brand, subset, mode, 
     return extractJsonArray(r);
   }
 
-  // fallback
   return await generateAllSubsetParallels(set_name, set_year);
 }
 
-// ── 两步法：先查子集列表，再逐个生成 ─────────────────────────────────────────
+// ── 两步法：Step1 发现子集，Step2 逐个生成 ───────────────────────────────────
 async function generateAllSubsetParallels(set_name, set_year) {
   // Step 1: 发现该产品的所有子集
   let subsets = ['Base Set'];
@@ -307,7 +311,10 @@ async function generateAllSubsetParallels(set_name, set_year) {
       tools: [{ type: 'web_search_20250305', name: 'web_search' }],
       messages: [{
         role: 'user',
-        content: `"${set_name}"（${set_year || ''}赛季）这套球星卡有哪些产品子集？例如 Base Set、Choice、Fast Break、Concourse、Premiere Level、Stained Glass 等。请搜索后只返回JSON字符串数组，格式：["Base Set","Choice","Fast Break"]，不加任何说明文字。`,
+        content: `"${set_name}"（${set_year || ''}赛季）这套球星卡产品共有哪些盒型子集（box set / subset）？
+例如 Prizm 有 Base Set、Choice、Fast Break；Select 有 Concourse、Premiere Level、Prizmatic；Mosaic 有 Mosaic、Stained Glass。
+请搜索后只返回JSON字符串数组，例如：["Base Set","Choice","Fast Break"]
+不要返回平行版本名称，只返回子集名称。不加任何说明文字。`,
       }],
     });
     const texts1 = r1.content.filter(b => b.type === 'text').map(b => b.text);
@@ -320,14 +327,14 @@ async function generateAllSubsetParallels(set_name, set_year) {
             subsets = parsed;
             break;
           }
-        } catch (e) { /* 继续尝试下一个 match */ }
+        } catch (e) { /* 继续尝试 */ }
       }
     }
   } catch (e) {
     console.error('[Step1] 查询子集失败，降级为 Base Set:', e.message);
   }
 
-  console.log(`[generateAllSubsetParallels] ${set_name} 发现子集:`, subsets);
+  console.log(`[generateAllSubsetParallels] ${set_name} 发现子集:`, JSON.stringify(subsets));
 
   // Step 2: 对每个子集单独生成平行清单
   const allItems = [];
@@ -342,15 +349,15 @@ async function generateAllSubsetParallels(set_name, set_year) {
           content: `你是球星卡专家。完整列出 "${set_name}"（${set_year || ''}赛季）"${subsetName}" 子集的所有平行版本，务必穷举不遗漏。
 
 重要规则：
-- "name" 字段只写平行颜色/类型本身，不含品牌前缀（写 "Silver" 不写 "Prizm Silver"，写 "Gold" 不写 "Prizm Gold"）
+- "name" 字段只写平行颜色/类型本身，不含品牌前缀（写 "Silver" 不写 "Prizm Silver"）
 - 无编号版本（如 Silver、Holo）必须包含，tier 为 "common"
-- 如有 SSP/SP 短印版本，标注 "ssp": true
+- SSP/SP 短印版本标注 "ssp": true
 
 返回纯JSON数组，每项格式：
-{"name":"版本英文名","name_cn":"版本中文名","numbered":true或false,"print_run":编号数量或null,"tier":"common/numbered/premium/ultra/1of1","subset":"${subsetName}","ssp":false}
+{"name":"英文名","name_cn":"中文名","numbered":true或false,"print_run":编号数量或null,"tier":"common/numbered/premium/ultra/1of1","subset":"${subsetName}","ssp":false}
 
-tier定义：common=无编号  numbered=编号>50  premium=编号6-50  ultra=编号2-5  1of1=限量1
-只返回JSON数组，不加任何说明文字。`,
+tier: common=无编号  numbered=编号>50  premium=编号6-50  ultra=编号2-5  1of1=限量1
+只返回JSON数组，不加任何说明。`,
         }],
       });
 
@@ -359,7 +366,7 @@ tier定义：common=无编号  numbered=编号>50  premium=编号6-50  ultra=编
       allItems.push(...items);
       console.log(`[generateAllSubsetParallels] ${subsetName}: ${items.length} 条`);
     } catch (e) {
-      console.error(`[generateAllSubsetParallels] 子集 "${subsetName}" 生成失败:`, e.message);
+      console.error(`[generateAllSubsetParallels] "${subsetName}" 生成失败:`, e.message);
     }
   }
 
