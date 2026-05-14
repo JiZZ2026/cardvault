@@ -71,9 +71,8 @@ export default async function handler(req, res) {
       }
     }
 
-    // ── 2. 确定监控条目 ───────────────────────────────────────────────────
-    let allItems = checklist.items || [];
-    if (mode === 'full_parallels') allItems = allItems.filter(i => i.tier !== 'base');
+    // ── 2. 确定监控条目（不过滤任何 tier，Silver 等无编号平行必须保留）───
+    const allItems = checklist.items || [];
 
     // ── 3. 比对已有卡片（严格匹配年份+系列）─────────────────────────────
     const owned = [];
@@ -138,11 +137,9 @@ async function queryOwnedCards(player_name, player_name_cn, checklist) {
   let q = supabase.from('cards').select('*');
   if (conds.length > 0) q = q.or(conds.join(','));
 
-  // 严格过滤年份 — 只拿该赛季的卡
   if (checklist && checklist.set_year) {
-    const yearStart = checklist.set_year.split('-')[0]; // "2020"
-    const yearEnd = checklist.set_year.split('-')[1];   // "21"
-    // 用更精确的匹配，如 "2020-21" 而不只是 "2020"
+    const yearStart = checklist.set_year.split('-')[0];
+    const yearEnd = checklist.set_year.split('-')[1];
     if (yearEnd) {
       q = q.ilike('year', '%' + yearStart + '-' + yearEnd + '%');
     } else {
@@ -150,7 +147,6 @@ async function queryOwnedCards(player_name, player_name_cn, checklist) {
     }
   }
 
-  // 也过滤系列名
   if (checklist && checklist.set_name) {
     const seriesKeyword = checklist.set_name.replace(/^\d{4}-\d{2,4}\s*/, '').replace(/\b(Basketball|NBA)\b/gi, '').trim().split(' ')[0];
     if (seriesKeyword.length > 2) {
@@ -174,10 +170,8 @@ function matchesItem(card, item, mode) {
   const iName = (item.name || '').toLowerCase().trim();
   const iCn = (item.name_cn || '').toLowerCase().trim();
 
-  // 精确匹配
   if (cp === iName) return true;
 
-  // 包含匹配 + 严格长度比例（≥0.75）防止 "gold refractor" 匹配 "geometric gold refractor"
   if (iName.length > 2 && cp.includes(iName)) {
     if (iName.length / cp.length >= 0.75) return true;
   }
@@ -185,25 +179,23 @@ function matchesItem(card, item, mode) {
     if (cp.length / iName.length >= 0.75) return true;
   }
 
-  // 中文名精确匹配
   if (iCn.length > 1 && cp === iCn) return true;
   if (iCn.length > 1 && cp.includes(iCn) && iCn.length / cp.length >= 0.75) return true;
 
   return false;
 }
 
-// ── 生成 watch_items（含优化的卡淘搜索词）────────────────────────────────────
+// ── 生成 watch_items ──────────────────────────────────────────────────────────
 async function generateWatchItems(goalId, goal, missingItems, checklist) {
   const cl = checklist || {};
   const playerLast = (goal.player_name || '').split(' ').pop() || '';
-  const playerCn = goal.player_name_cn || '';
+  const playerCn = goal.player_name_cn || playerLast;
 
-  // 年份简写：2020-21 → 20-21
   const setYear = cl.set_year || '';
-  const yearShort = setYear.replace(/^20(\d{2})-(\d{2,4}).*$/, '$1-$2'); // "20-21"
-  const yearStart = setYear.split('-')[0]; // "2020"
+  // 年份简写：2020-21 → 20-21
+  const yearShort = setYear.replace(/^20(\d{2})-(\d{2,4}).*$/, '$1-$2');
+  const yearStart = setYear.split('-')[0];
 
-  // 系列关键词
   const setName = cl.set_name || '';
   const seriesEn = setName.includes('Prizm') ? 'Prizm'
     : setName.includes('Chrome') ? 'Chrome'
@@ -214,24 +206,17 @@ async function generateWatchItems(goalId, goal, missingItems, checklist) {
 
   const items = missingItems.map(item => {
     const name = item.name || '';
-    const nameCn = item.name_cn || '';
     const numStr = item.print_run ? ('/' + item.print_run) : '';
 
-    // eBay 关键词：球员姓+年份+系列英文名+平行英文名+编号
+    // 卡淘关键词：越简洁越好，不加平行名
+    // 有编号：加内特 20-21 prizm /10
+    // 无编号：加内特 20-21 prizm
+    const kataoKw = [playerCn, yearShort, seriesCn, numStr].filter(Boolean).join(' ').trim();
+
+    // eBay：姓 + 年份 + 系列英文 + 平行英文 + 编号
     const ebayKw = [playerLast, yearStart, seriesEn, name, numStr].filter(Boolean).join(' ');
 
-    // 卡淘关键词：中文球员名+系列+中文平行名+编号+短年份
-    // 优先用中文名，关键词精简（3-4个词）
-    const kataoParts = [];
-    if (playerCn) kataoParts.push(playerCn);
-    kataoParts.push(seriesCn);
-    if (nameCn) kataoParts.push(nameCn);
-    else kataoParts.push(name.toLowerCase());
-    if (numStr) kataoParts.push(numStr);
-    if (yearShort) kataoParts.push(yearShort);
-    const kataoKw = kataoParts.filter(Boolean).join(' ');
-
-    const desc = [playerLast, nameCn || name, numStr].filter(Boolean).join(' ');
+    const desc = [playerLast, name, numStr].filter(Boolean).join(' ');
 
     return {
       source: 'collection_goal',
@@ -280,7 +265,6 @@ async function syncOwnedCards(goalId, res) {
 // ── AI 生成清单 ───────────────────────────────────────────────────────────────
 function applyFilter(items, cond) {
   return items.filter(item => {
-    if (item.tier === 'base') return false;
     if (cond.color) {
       const c = cond.color.toLowerCase();
       if (!item.name.toLowerCase().includes(c) && !(item.name_cn || '').includes(cond.color)) return false;
@@ -308,7 +292,25 @@ async function generateChecklistWithAI(set_name, set_year, brand, subset, mode, 
     else condDesc = '所有平行版本';
     prompt = '你是球星卡专家。列出 "' + set_name + '"（' + (set_year || '') + '赛季）中，' + condDesc + '。务必穷举所有变体。' + (printRun ? '只列编号恰好是 /' + printRun + ' 的版本。' : '') + '返回纯JSON数组，每项：{"name":"版本英文名","name_cn":"版本中文名","numbered":true,"print_run":' + (printRun || '编号数量') + ',"tier":"common/numbered/premium/ultra/1of1"}。只返回JSON数组。';
   } else {
-    prompt = '你是球星卡专家。完整列出 "' + set_name + '"（' + (set_year || '') + '赛季）' + (subset && subset !== 'Base' ? '"' + subset + '" 子集' : 'Base 系列') + '的所有平行折射版本，务必穷举不遗漏。返回纯JSON数组，每项：{"name":"版本英文名","name_cn":"版本中文名","numbered":true或false,"print_run":编号数量或null,"tier":"base/common/numbered/premium/ultra/1of1"}。tier: base=基础版 common=无编号 numbered=编号>50 premium=编号6-50 ultra=编号2-5 1of1=限量1。只返回JSON数组。';
+    // full_parallels 或 默认
+    prompt = `你是球星卡专家。完整列出 "${set_name}"（${set_year || ''}赛季）所有平行折射版本，必须覆盖所有子集。
+
+对于 Prizm / Select / Mosaic 等多子集产品，请分别列出：
+- Base Set 全部平行（含 Silver 等无编号版本）
+- Choice 独占平行（如有）
+- Fast Break 独占平行（如有）
+- 其他子集（如有）
+
+重要规则：
+- "name" 字段只写平行颜色/类型本身，不含品牌前缀（写 "Silver" 不写 "Prizm Silver"，写 "Gold" 不写 "Prizm Gold"）
+- Silver / Holo 等无编号基础平行必须包含，tier 为 "common"
+- SSP 版本需标注 ssp: true
+
+返回纯JSON数组，每项格式：
+{"name":"版本英文名","name_cn":"版本中文名","numbered":true或false,"print_run":编号数量或null,"tier":"common/numbered/premium/ultra/1of1","subset":"Base/Choice/Fast Break等","ssp":false}
+
+tier定义：common=无编号  numbered=编号>50  premium=编号6-50  ultra=编号2-5  1of1=限量1
+只返回JSON数组，不加任何说明文字。`;
   }
 
   const r = await anthropic.messages.create({
@@ -331,7 +333,7 @@ function extractJsonArray(response) {
       else if (text[i] === ']') { depth--; if (depth === 0 && start !== -1) { allArrays.push(text.slice(start, i + 1)); start = -1; } }
     }
     const candidates = allArrays
-      .map(s => { try { const p = JSON.parse(s); return (Array.isArray(p) && p.length > 0 && p[0] && p[0].name) ? p : null; } catch (e) { return null; } })
+      .map(s => { try { const p = JSON.parse(s); return (Array.isArray(p) && p.length > 0 && p[0] && (p[0].name || p[0].number)) ? p : null; } catch (e) { return null; } })
       .filter(Boolean).sort((a, b) => b.length - a.length);
     if (candidates.length > 0) return candidates[0];
   }
