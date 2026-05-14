@@ -5,6 +5,27 @@ import Anthropic from '@anthropic-ai/sdk';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// ── 已知产品的子集结构（硬编码，AI发现作为兜底）─────────────────────────────
+const KNOWN_SUBSETS = {
+  'prizm':      ['Base Set', 'Choice', 'Fast Break'],
+  'select':     ['Concourse', 'Premiere Level', 'Prizmatic'],
+  'mosaic':     ['Base Set', 'Stained Glass'],
+  'optic':      ['Base Set', 'Hyper'],
+  'chronicles': ['Base Set'],
+  'hoops':      ['Base Set'],
+  'chrome':     ['Base Set', 'Refractor'],
+  'donruss':    ['Base Set'],
+  'contenders': ['Base Set', 'Draft Picks'],
+};
+
+function getKnownSubsets(set_name) {
+  const lower = (set_name || '').toLowerCase();
+  for (const [key, subsets] of Object.entries(KNOWN_SUBSETS)) {
+    if (lower.includes(key)) return subsets;
+  }
+  return null;
+}
+
 export default async function handler(req, res) {
 
   if (req.method === 'GET') {
@@ -50,7 +71,6 @@ export default async function handler(req, res) {
       if (clErr) return res.status(500).json({ error: '清单保存失败: ' + clErr.message });
       checklist = newCL;
     } else {
-      // 优先用指定 checklist_id
       if (checklist_id) {
         const { data: existing } = await supabase.from('checklists').select('*').eq('id', checklist_id).maybeSingle();
         if (existing) checklist = existing;
@@ -58,12 +78,11 @@ export default async function handler(req, res) {
 
       if (!checklist) {
         if (mode === 'full_parallels') {
-          // full_parallels 只接受 'Full' 子集，绝不复用 'Base'（Base 是不完整的单子集清单）
+          // full_parallels 只接受 'Full'，绝不复用残缺的 'Base'
           const { data: existing } = await supabase.from('checklists').select('*')
             .ilike('set_name', '%' + set_name + '%').eq('subset', 'Full').maybeSingle();
           if (existing) checklist = existing;
         } else {
-          // 其他模式：先找指定 subset，再找 Full
           const subsetToFind = subset || 'Base';
           const { data: existing } = await supabase.from('checklists').select('*')
             .ilike('set_name', '%' + set_name + '%').eq('subset', subsetToFind).maybeSingle();
@@ -210,6 +229,7 @@ async function generateWatchItems(goalId, goal, missingItems, checklist) {
 
   const setName = cl.set_name || '';
   const seriesEn = setName.includes('Prizm') ? 'Prizm'
+    : setName.includes('prizm') ? 'Prizm'
     : setName.includes('Chrome') ? 'Chrome'
     : setName.includes('Select') ? 'Select'
     : setName.includes('Hoops') ? 'Hoops'
@@ -220,7 +240,7 @@ async function generateWatchItems(goalId, goal, missingItems, checklist) {
     const name = item.name || '';
     const numStr = item.print_run ? ('/' + item.print_run) : '';
 
-    // 卡淘：越简洁越好，不加平行名
+    // 卡淘：越简洁越好
     // 有编号：加内特 20-21 prizm /10
     // 无编号：加内特 20-21 prizm
     const kataoKw = [playerCn, yearShort, seriesCn, numStr].filter(Boolean).join(' ').trim();
@@ -300,43 +320,45 @@ async function generateChecklistWithAI(set_name, set_year, brand, subset, mode, 
   return await generateAllSubsetParallels(set_name, set_year);
 }
 
-// ── 两步法：Step1 发现子集，Step2 逐个生成 ───────────────────────────────────
+// ── 多子集生成：硬编码已知产品，未知产品 AI 发现 ─────────────────────────────
 async function generateAllSubsetParallels(set_name, set_year) {
-  // Step 1: 发现该产品的所有子集
-  let subsets = ['Base Set'];
-  try {
-    const r1 = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 800,
-      tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-      messages: [{
-        role: 'user',
-        content: `"${set_name}"（${set_year || ''}赛季）这套球星卡产品共有哪些盒型子集（box set / subset）？
-例如 Prizm 有 Base Set、Choice、Fast Break；Select 有 Concourse、Premiere Level、Prizmatic；Mosaic 有 Mosaic、Stained Glass。
-请搜索后只返回JSON字符串数组，例如：["Base Set","Choice","Fast Break"]
-不要返回平行版本名称，只返回子集名称。不加任何说明文字。`,
-      }],
-    });
-    const texts1 = r1.content.filter(b => b.type === 'text').map(b => b.text);
-    for (const t of texts1) {
-      const m = t.match(/\[[\s\S]*?\]/);
-      if (m) {
-        try {
-          const parsed = JSON.parse(m[0]);
-          if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === 'string') {
-            subsets = parsed;
-            break;
-          }
-        } catch (e) { /* 继续尝试 */ }
+  // 优先用硬编码子集结构（准确可靠）
+  let subsets = getKnownSubsets(set_name);
+
+  // 未知产品才用 AI 发现
+  if (!subsets) {
+    subsets = ['Base Set'];
+    try {
+      const r1 = await anthropic.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 600,
+        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        messages: [{
+          role: 'user',
+          content: `"${set_name}"（${set_year || ''}赛季）这套球星卡有哪些独立的盒型子集产品？只返回子集名称数组，例如：["Base Set","Choice","Fast Break"]，不包含平行版本名。`,
+        }],
+      });
+      const texts = r1.content.filter(b => b.type === 'text').map(b => b.text);
+      for (const t of texts) {
+        const m = t.match(/\[[\s\S]*?\]/);
+        if (m) {
+          try {
+            const parsed = JSON.parse(m[0]);
+            if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === 'string') {
+              subsets = parsed;
+              break;
+            }
+          } catch (e) { /* 继续 */ }
+        }
       }
+    } catch (e) {
+      console.error('[Step1] AI子集发现失败:', e.message);
     }
-  } catch (e) {
-    console.error('[Step1] 查询子集失败，降级为 Base Set:', e.message);
   }
 
-  console.log(`[generateAllSubsetParallels] ${set_name} 发现子集:`, JSON.stringify(subsets));
+  console.log(`[generateAllSubsetParallels] "${set_name}" 子集:`, JSON.stringify(subsets));
 
-  // Step 2: 对每个子集单独生成平行清单
+  // 对每个子集单独生成平行清单
   const allItems = [];
   for (const subsetName of subsets) {
     try {
@@ -346,27 +368,26 @@ async function generateAllSubsetParallels(set_name, set_year) {
         tools: [{ type: 'web_search_20250305', name: 'web_search' }],
         messages: [{
           role: 'user',
-          content: `你是球星卡专家。完整列出 "${set_name}"（${set_year || ''}赛季）"${subsetName}" 子集的所有平行版本，务必穷举不遗漏。
+          content: `你是球星卡专家。完整列出 "${set_name}"（${set_year || ''}赛季）"${subsetName}" 子集的所有平行版本，务必穷举。
 
-重要规则：
-- "name" 字段只写平行颜色/类型本身，不含品牌前缀（写 "Silver" 不写 "Prizm Silver"）
-- 无编号版本（如 Silver、Holo）必须包含，tier 为 "common"
-- SSP/SP 短印版本标注 "ssp": true
+规则：
+- "name" 只写颜色/类型，不含品牌前缀（写 "Silver" 不写 "Prizm Silver"）
+- 无编号版本（Silver、Holo 等）必须包含，tier 为 "common"
+- SSP/SP 标注 "ssp": true
 
-返回纯JSON数组，每项格式：
-{"name":"英文名","name_cn":"中文名","numbered":true或false,"print_run":编号数量或null,"tier":"common/numbered/premium/ultra/1of1","subset":"${subsetName}","ssp":false}
+返回纯JSON数组：
+{"name":"英文名","name_cn":"中文名","numbered":true或false,"print_run":编号或null,"tier":"common/numbered/premium/ultra/1of1","subset":"${subsetName}","ssp":false}
 
-tier: common=无编号  numbered=编号>50  premium=编号6-50  ultra=编号2-5  1of1=限量1
-只返回JSON数组，不加任何说明。`,
+只返回JSON数组，不加说明。`,
         }],
       });
 
       const items = extractJsonArray(r2);
       items.forEach(item => { if (!item.subset) item.subset = subsetName; });
       allItems.push(...items);
-      console.log(`[generateAllSubsetParallels] ${subsetName}: ${items.length} 条`);
+      console.log(`[generateAllSubsetParallels] "${subsetName}": ${items.length} 条`);
     } catch (e) {
-      console.error(`[generateAllSubsetParallels] "${subsetName}" 生成失败:`, e.message);
+      console.error(`[generateAllSubsetParallels] "${subsetName}" 失败:`, e.message);
     }
   }
 
