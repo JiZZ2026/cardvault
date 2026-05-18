@@ -193,6 +193,17 @@ const apiAddWatchItem = async (body) => {
   const d = await r.json();
   return r.ok ? { success:true, data:d } : { success:false, error:d.error };
 };
+const apiRemoveGoalItem = async (goalId, itemName) => {
+  const r = await fetch(`/api/collection-goals?id=${goalId}&action=remove_item`, { method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ item_name: itemName }) });
+  const d = await r.json();
+  return r.ok ? { success:true, data:d } : { success:false, error:d.error };
+};
+const apiRadarScanSold = async (goal_id = null) => {
+  const body = { action:'sold', ...(goal_id ? { goal_id } : {}) };
+  const r = await fetch("/api/radar-scan", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
+  const d = await r.json();
+  return r.ok ? d : { success:false, results:[] };
+};
 
 // ── Context ──────────────────────────────────────────────────────────────────
 const Ctx = createContext(null);
@@ -1323,6 +1334,10 @@ function GoalCard({ goal, onDelete, onSync, onRefresh, onScanDone }) {
   const [addName, setAddName] = useState("");
   const [addKw, setAddKw] = useState("");
   const [adding, setAdding] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [removingItem, setRemovingItem] = useState(null);
+  const [soldResults, setSoldResults] = useState(null);
+  const [loadingSold, setLoadingSold] = useState(false);
 
   const doScan = async e => {
     e.stopPropagation();
@@ -1346,6 +1361,22 @@ function GoalCard({ goal, onDelete, onSync, onRefresh, onScanDone }) {
     setAddName(""); setAddKw(""); setShowAddForm(false); setAdding(false);
     if (onRefresh) onRefresh();
   };
+
+  const doRemoveItem = async (itemName) => {
+    setRemovingItem(itemName);
+    await apiRemoveGoalItem(goal.id, itemName);
+    setRemovingItem(null);
+    if (onRefresh) onRefresh();
+  };
+
+  const doLoadSold = async (e) => {
+    e.stopPropagation();
+    setLoadingSold(true); setSoldResults(null);
+    const r = await apiRadarScanSold(goal.id);
+    setSoldResults(r.results || []);
+    setLoadingSold(false);
+  };
+
   const TIER_COLOR = { common:T.muted, numbered:T.blue, premium:T.gold, ultra:T.orange, "1of1":T.red };
   const doSync = async e => { e.stopPropagation(); setSyncing(true); await onSync(); setSyncing(false); };
   const pct = goal.progress_pct || 0;
@@ -1384,17 +1415,12 @@ function GoalCard({ goal, onDelete, onSync, onRefresh, onScanDone }) {
         </div>
       </div>
 
-      {/* 展开区域：始终渲染，不管缺口数量 */}
       {expanded && (
         <div style={{ borderTop:`1px solid ${T.border}`, padding:"10px 14px" }}>
-
-          {/* 合并显示：已有（绿）+ 缺口（金/橙/红按稀有度），全部英文名 */}
           {(owned.length > 0 || missing.length > 0) && (
             <div style={{ marginBottom:12 }}>
               <div style={{ display:"flex", gap:10, marginBottom:8, alignItems:"center" }}>
-                <span style={{ fontSize:10, color:T.dim, fontFamily:"'Space Mono',monospace", letterSpacing:1 }}>
-                  全部版本
-                </span>
+                <span style={{ fontSize:10, color:T.dim, fontFamily:"'Space Mono',monospace", letterSpacing:1 }}>全部版本</span>
                 <span style={{ fontSize:10, color:T.green }}>✓ {owned.length} 已有</span>
                 {missing.length > 0 && <span style={{ fontSize:10, color:T.orange }}>○ {missing.length} 缺口</span>}
               </div>
@@ -1405,28 +1431,25 @@ function GoalCard({ goal, onDelete, onSync, onRefresh, onScanDone }) {
                   </span>
                 ))}
                 {missing.map((item, i) => (
-                  <span key={"m"+i} style={{ padding:"4px 10px", borderRadius:20, fontSize:11, fontWeight:600, color:TIER_COLOR[item.tier]||T.muted, background:`${TIER_COLOR[item.tier]||T.muted}15`, border:`1px solid ${TIER_COLOR[item.tier]||T.muted}40` }}>
+                  <span key={"m"+i} style={{ position:"relative", padding: editMode ? "4px 24px 4px 10px" : "4px 10px", borderRadius:20, fontSize:11, fontWeight:600, color:TIER_COLOR[item.tier]||T.muted, background:`${TIER_COLOR[item.tier]||T.muted}15`, border:`1px solid ${TIER_COLOR[item.tier]||T.muted}40`, transition:"padding 0.15s" }}>
                     {item.name}{item.print_run ? ` /${item.print_run}` : ""}
+                    {editMode && (
+                      <span onClick={e => { e.stopPropagation(); doRemoveItem(item.name); }}
+                        style={{ position:"absolute", top:1, right:4, fontSize:12, color:T.red, cursor:"pointer", fontWeight:700, lineHeight:1, opacity: removingItem === item.name ? 0.4 : 1 }}>×</span>
+                    )}
                   </span>
                 ))}
               </div>
             </div>
           )}
 
-          {/* 手动添加表单 */}
           {showAddForm && (
             <div style={{ marginBottom:10, padding:"10px 12px", borderRadius:10, background:T.s3, border:`1px solid ${T.borderGold}` }}>
               <div style={{ fontSize:10, color:T.dim, fontFamily:"'Space Mono',monospace", marginBottom:8 }}>手动添加监控版本</div>
-              <input
-                value={addName} onChange={e => setAddName(e.target.value)}
-                placeholder="版本名称，如 Gold Cracked Ice /50"
-                style={{ width:"100%", padding:"8px 10px", border:`1px solid ${T.border}`, borderRadius:8, background:T.s2, color:T.text, fontSize:12, outline:"none", marginBottom:6 }}
-              />
-              <input
-                value={addKw} onChange={e => setAddKw(e.target.value)}
-                placeholder="eBay搜索词（留空自动用名称）"
-                style={{ width:"100%", padding:"8px 10px", border:`1px solid ${T.border}`, borderRadius:8, background:T.s2, color:T.text, fontSize:12, outline:"none", marginBottom:8 }}
-              />
+              <input value={addName} onChange={e => setAddName(e.target.value)} placeholder="版本名称，如 Gold Cracked Ice /50"
+                style={{ width:"100%", padding:"8px 10px", border:`1px solid ${T.border}`, borderRadius:8, background:T.s2, color:T.text, fontSize:12, outline:"none", marginBottom:6 }} />
+              <input value={addKw} onChange={e => setAddKw(e.target.value)} placeholder="eBay搜索词（留空自动用名称）"
+                style={{ width:"100%", padding:"8px 10px", border:`1px solid ${T.border}`, borderRadius:8, background:T.s2, color:T.text, fontSize:12, outline:"none", marginBottom:8 }} />
               <div style={{ display:"flex", gap:6 }}>
                 <button onClick={doAdd} disabled={adding||!addName.trim()} style={{ flex:1, padding:"8px", borderRadius:8, border:"none", background:addName.trim()?T.gold:T.s2, color:addName.trim()?"#000":T.dim, fontSize:12, fontWeight:700, cursor:"pointer" }}>
                   {adding ? "添加中..." : "✓ 添加"}
@@ -1436,7 +1459,23 @@ function GoalCard({ goal, onDelete, onSync, onRefresh, onScanDone }) {
             </div>
           )}
 
-          {/* 扫描消息 */}
+          {soldResults !== null && (
+            <div style={{ marginBottom:10 }}>
+              <div style={{ fontSize:10, color:T.dim, fontFamily:"'Space Mono',monospace", letterSpacing:1, marginBottom:8 }}>SOLD · 近期成交</div>
+              {soldResults.length === 0 && <div style={{ fontSize:12, color:T.muted, padding:"8px 0" }}>暂无已售记录</div>}
+              {soldResults.slice(0, 10).map((r, i) => (
+                <div key={i} style={{ display:"flex", gap:8, padding:"8px 0", borderBottom: i < soldResults.length - 1 ? `1px solid ${T.border}` : "none", alignItems:"center" }}>
+                  {r.image_url && <img src={r.image_url} alt="" style={{ width:36, height:50, objectFit:"contain", borderRadius:4, flexShrink:0 }} />}
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:11, color:T.text, lineHeight:1.4, overflow:"hidden", display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical" }}>{r.title}</div>
+                    <span style={{ fontSize:12, fontWeight:700, color:T.muted }}>¥{Number(r.price).toLocaleString('zh-CN')}</span>
+                  </div>
+                  {r.listing_url && <a href={r.listing_url} target="_blank" rel="noreferrer" style={{ fontSize:10, padding:"5px 8px", borderRadius:6, background:T.s3, color:T.blue, textDecoration:"none", flexShrink:0 }}>查看</a>}
+                </div>
+              ))}
+            </div>
+          )}
+
           {scanMsg && (
             <div style={{ padding:"8px 12px", borderRadius:8, marginBottom:8,
               background: scanMsg.includes("✅") ? "rgba(48,209,88,0.08)" : scanMsg.includes("失败") ? "rgba(212,80,80,0.08)" : "rgba(255,159,10,0.08)",
@@ -1446,15 +1485,20 @@ function GoalCard({ goal, onDelete, onSync, onRefresh, onScanDone }) {
             </div>
           )}
 
-          {/* 操作按钮 */}
-          <div style={{ display:"flex", gap:8, marginTop:4 }}>
-            <button onClick={() => setShowAddForm(f => !f)} style={{ padding:"9px 12px", borderRadius:10, border:`1px solid ${T.borderGold}`, background:"rgba(200,168,75,0.06)", color:T.gold, fontSize:12, cursor:"pointer" }}>
-              + 手动添加
+          <div style={{ display:"flex", gap:6, marginTop:4, flexWrap:"wrap" }}>
+            <button onClick={e => { e.stopPropagation(); setEditMode(m => !m); setShowAddForm(false); }} style={{ padding:"8px 10px", borderRadius:10, border:`1px solid ${editMode ? T.borderGold : T.border}`, background: editMode ? "rgba(200,168,75,0.1)" : "transparent", color: editMode ? T.gold : T.muted, fontSize:12, cursor:"pointer" }}>
+              {editMode ? "✓ 完成编辑" : "✏️ 编辑"}
             </button>
-            <button onClick={doSync} disabled={syncing} style={{ flex:1, padding:"9px", borderRadius:10, border:`1px solid ${T.border}`, background:"transparent", color:T.blue, fontSize:12, cursor:"pointer" }}>
+            <button onClick={e => { e.stopPropagation(); setShowAddForm(f => !f); setEditMode(false); }} style={{ padding:"8px 10px", borderRadius:10, border:`1px solid ${T.borderGold}`, background:"rgba(200,168,75,0.06)", color:T.gold, fontSize:12, cursor:"pointer" }}>
+              + 添加
+            </button>
+            <button onClick={doLoadSold} disabled={loadingSold} style={{ padding:"8px 10px", borderRadius:10, border:`1px solid ${T.border}`, background:"transparent", color:T.muted, fontSize:12, cursor:"pointer" }}>
+              {loadingSold ? "查询中..." : "📋 已售"}
+            </button>
+            <button onClick={doSync} disabled={syncing} style={{ flex:1, padding:"8px", borderRadius:10, border:`1px solid ${T.border}`, background:"transparent", color:T.blue, fontSize:12, cursor:"pointer" }}>
               {syncing ? "同步中..." : "↻ 同步"}
             </button>
-            <button onClick={() => { if (window.confirm(`删除目标「${goal.title}」？`)) onDelete(); }} style={{ padding:"9px 12px", borderRadius:10, border:"1px solid rgba(212,80,80,0.2)", background:"rgba(212,80,80,0.05)", color:T.red, fontSize:12, cursor:"pointer" }}>
+            <button onClick={() => { if (window.confirm(`删除目标「${goal.title}」？`)) onDelete(); }} style={{ padding:"8px 10px", borderRadius:10, border:"1px solid rgba(212,80,80,0.2)", background:"rgba(212,80,80,0.05)", color:T.red, fontSize:12, cursor:"pointer" }}>
               🗑
             </button>
           </div>
@@ -1463,7 +1507,6 @@ function GoalCard({ goal, onDelete, onSync, onRefresh, onScanDone }) {
     </div>
   );
 }
-
 function NewGoalScreen({ pcP, onDone, onBack }) {
   const [step, setStep] = useState("mode");
   const [mode, setMode] = useState("");
@@ -1473,7 +1516,7 @@ function NewGoalScreen({ pcP, onDone, onBack }) {
   const [checklists, setChecklists] = useState([]);
   const [selectedCL, setSelectedCL] = useState(null);
   const [clSearch, setClSearch] = useState("");
-  const [filterCond, setFilterCond] = useState({ color:"", max_print_run:"" });
+  const [filterCond, setFilterCond] = useState({ color:"", max_print_run:"", base_only:true, include_autos:false });
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
@@ -1494,9 +1537,11 @@ function NewGoalScreen({ pcP, onDone, onBack }) {
   const save = async () => {
     if (!title || !mode || !selectedCL) { setErr("请填写完整信息"); return; }
     setSaving(true); setErr("");
-    const filter = mode === "filtered_parallels" ? {
+    const filter = (mode === "filtered_parallels" || mode === "full_parallels") ? {
       ...(filterCond.color ? { color:filterCond.color } : {}),
       ...(filterCond.max_print_run ? { max_print_run:parseInt(filterCond.max_print_run) } : {}),
+      base_only: filterCond.base_only !== false,
+      include_autos: filterCond.include_autos === true,
     } : undefined;
     const r = await apiCreateGoal({
       title, mode,
@@ -1553,6 +1598,18 @@ function NewGoalScreen({ pcP, onDone, onBack }) {
               <FF label="颜色筛选（可选，留空=所有颜色）"><Inp value={filterCond.color} onChange={v=>setFilterCond(f=>({...f,color:v}))} placeholder="如 Gold，留空则不限颜色" /></FF>
               <FF label="指定编号（可选）"><Inp value={filterCond.max_print_run} onChange={v=>setFilterCond(f=>({...f,max_print_run:v}))} placeholder="如 50（精确匹配所有 /50 版本）" type="number" /></FF>
             </>}
+            {(mode === "filtered_parallels" || mode === "full_parallels") && (
+              <div style={{ display:"flex", gap:10, marginBottom:14 }}>
+                <div onClick={() => setFilterCond(f=>({...f,base_only:!f.base_only}))} style={{ flex:1, display:"flex", alignItems:"center", gap:8, padding:"10px 12px", borderRadius:10, border:`1px solid ${filterCond.base_only ? T.borderGold : T.border}`, background: filterCond.base_only ? "rgba(200,168,75,0.08)" : T.s3, cursor:"pointer" }}>
+                  <span style={{ fontSize:16 }}>{filterCond.base_only ? "✅" : "⬜"}</span>
+                  <div><div style={{ fontSize:12, color:T.text, fontWeight:600 }}>仅 Base Set</div><div style={{ fontSize:10, color:T.muted }}>排除 Insert 特卡</div></div>
+                </div>
+                <div onClick={() => setFilterCond(f=>({...f,include_autos:!f.include_autos}))} style={{ flex:1, display:"flex", alignItems:"center", gap:8, padding:"10px 12px", borderRadius:10, border:`1px solid ${filterCond.include_autos ? T.borderGold : T.border}`, background: filterCond.include_autos ? "rgba(200,168,75,0.08)" : T.s3, cursor:"pointer" }}>
+                  <span style={{ fontSize:16 }}>{filterCond.include_autos ? "✅" : "⬜"}</span>
+                  <div><div style={{ fontSize:12, color:T.text, fontWeight:600 }}>包含签字卡</div><div style={{ fontSize:10, color:T.muted }}>Autograph 也列入</div></div>
+                </div>
+              </div>
+            )}
             <button onClick={() => setStep("checklist")} disabled={!title} style={{ width:"100%", padding:"13px", borderRadius:12, border:"none", background: title ? `linear-gradient(135deg,${T.gold},${T.goldDark})` : T.s3, color: title ? "#000" : T.dim, fontSize:14, fontWeight:700, marginTop:8 }}>下一步：选择系列清单 →</button>
           </div>
         )}
