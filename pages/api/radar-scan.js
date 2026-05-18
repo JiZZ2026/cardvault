@@ -6,7 +6,7 @@ import { searchKatao } from './katao-search';
 
 export default async function handler(req, res) {
 
-  // GET：返回最新扫描结果
+  // GET：返回最新在售扫描结果
   if (req.method === 'GET') {
     const { data, error } = await supabase
       .from('scan_results')
@@ -24,7 +24,7 @@ export default async function handler(req, res) {
     for (const r of (data || [])) {
       const wid = r.watch_item_id;
       if (!grouped[wid]) grouped[wid] = { watch_item: r.watch_item, results: [] };
-      if (grouped[wid].results.length < 5) grouped[wid].results.push(r);
+      if (grouped[wid].results.length < 10) grouped[wid].results.push(r);
     }
     const items = Object.values(grouped);
     return res.status(200).json({
@@ -35,11 +35,53 @@ export default async function handler(req, res) {
     });
   }
 
-  // POST：触发扫描
+  // POST：触发扫描 或 查询已售
   if (req.method === 'POST') {
-    const { goal_id } = req.body || {};
+    const { goal_id, action } = req.body || {};
 
-    // Step 1: 获取监控条目
+    // ── 已售查询：不写 DB，直接返回搜索结果 ─────────────────────────────────
+    if (action === 'sold') {
+      const watchItems = await getActiveWatchItems(goal_id || null);
+      if (!watchItems.length) {
+        return res.status(200).json({ success: false, results: [], message: '无监控条目，请先同步目标' });
+      }
+
+      const results = [];
+      const seen = new Set();
+      for (const item of watchItems) {
+        const kw = (item.search_keywords_katao || '').trim();
+        if (!kw || seen.has(kw)) continue;
+        seen.add(kw);
+        try {
+          const hits = await searchKatao(kw, true); // sold=true
+          for (const r of hits.slice(0, 10)) {
+            results.push({
+              id: r.id,
+              title: r.title,
+              price: r.price,
+              price_currency: 'RMB',
+              listing_url: r.url,
+              image_url: r.image || null,
+              listing_type: r.listingType || 'buy_now',
+              platform: 'katao',
+              watch_item_description: item.description,
+            });
+          }
+        } catch (e) {
+          console.error(`已售搜索失败 "${kw}":`, e.message);
+        }
+        await sleep(300);
+      }
+
+      return res.status(200).json({
+        success: true,
+        results,
+        total: results.length,
+        message: results.length > 0 ? `找到 ${results.length} 条已售记录` : '暂无已售记录',
+      });
+    }
+
+    // ── 在售扫描 ──────────────────────────────────────────────────────────────
     let watchItems = await getActiveWatchItems(goal_id || null);
 
     if (watchItems.length === 0 && !goal_id) {
@@ -56,26 +98,34 @@ export default async function handler(req, res) {
     if (watchItems.length === 0) {
       return res.status(200).json({
         success: false, scanned: 0, found: 0,
-        message: goal_id ? '该目标暂无缺口监控条目，请先同步' : '监控条目重建失败，请重新同步目标',
+        message: goal_id ? '该目标暂无监控条目，请先同步' : '监控条目重建失败，请重新同步目标',
       });
     }
 
-    // Step 2: 单目标扫全部，全量扫描每次取前 20 条
+    // ── 关键词去重：相同关键词只搜一次 ──────────────────────────────────────
     const BATCH = goal_id ? watchItems.length : 20;
     const batch = watchItems.slice(0, BATCH);
 
-    let found = 0, scanned = 0, kataoFailed = false;
+    let found = 0, scanned = 0;
     const newResults = [];
+    const seenKw = new Set(); // ✅ 去重 set
 
     for (const item of batch) {
       const kw = (item.search_keywords_katao || '').trim();
       if (!kw) continue;
 
+      // ✅ 相同关键词跳过，不重复搜索
+      if (seenKw.has(kw)) {
+        console.log(`[radar-scan] 跳过重复关键词: "${kw}"`);
+        continue;
+      }
+      seenKw.add(kw);
       scanned++;
+
       try {
-        const results = await searchKatao(kw);
+        const results = await searchKatao(kw, false); // sold=false，在售
         found += results.length;
-        for (const r of results.slice(0, 5)) {
+        for (const r of results.slice(0, 10)) {
           newResults.push({
             watch_item_id: item.id,
             platform: 'katao',
@@ -92,13 +142,11 @@ export default async function handler(req, res) {
           });
         }
       } catch (e) {
-        kataoFailed = true;
         console.error(`卡淘搜索失败 "${kw}":`, e.message);
-        // 如果是网络错误（Vercel 访问不到卡淘），提前终止
         if (e.message.includes('超时') || e.message.includes('fetch') || e.name === 'AbortError') {
           return res.status(200).json({
             success: false, scanned, found: 0,
-            message: `卡淘访问失败（可能被 Vercel 服务器屏蔽）：${e.message}\n请查看 /api/katao-debug?keyword=加内特+prizm 确认网络连通性`,
+            message: `卡淘访问失败：${e.message}`,
           });
         }
       }
@@ -110,19 +158,20 @@ export default async function handler(req, res) {
       await sleep(500);
     }
 
-    // Step 3: 写入结果
+    // 写入结果（先清旧结果，再插新结果）
     if (newResults.length > 0) {
-      await supabase.from('scan_results')
-        .delete().in('watch_item_id', batch.map(i => i.id));
+      // 只清涉及到的 watch_item_id 的旧结果
+      const affectedIds = [...new Set(newResults.map(r => r.watch_item_id))];
+      await supabase.from('scan_results').delete().in('watch_item_id', affectedIds);
       await supabase.from('scan_results').insert(newResults);
     }
 
     const remaining = watchItems.length - BATCH;
     let message;
     if (found > 0) {
-      message = `✅ 找到 ${found} 个结果（扫描了 ${scanned} 条）${remaining > 0 ? `，还有 ${remaining} 条待下次扫描` : ''}`;
+      message = `✅ 找到 ${found} 个结果（搜索了 ${scanned} 个关键词）${remaining > 0 ? `，还有 ${remaining} 条待下次` : ''}`;
     } else {
-      message = `扫描完成（${scanned} 条）：卡淘暂无匹配在售卡片${remaining > 0 ? `，还有 ${remaining} 条待下次` : ''}`;
+      message = `扫描完成（${scanned} 个关键词）：卡淘暂无匹配在售卡片`;
     }
 
     return res.status(200).json({ success: true, scanned, found, message });
@@ -150,53 +199,45 @@ async function rebuildWatchItems() {
   let total = 0;
 
   for (const goal of goals) {
-    const missing = goal.missing_items || [];
-    if (!missing.length) continue;
+    if (goal.mode === 'full_players') continue; // full_players 暂不生成搜索条目
 
     const cl = goal.checklist || {};
-    const playerLast = (goal.player_name || '').split(' ').pop() || '';
-    const playerCn   = goal.player_name_cn || playerLast;
-    const setName    = cl.set_name || '';
-    const yearParts  = (cl.set_year || '').split('-');
-    const yearShort  = yearParts.length >= 2
+    const playerCn = goal.player_name_cn || (goal.player_name || '').split(' ').pop() || '';
+    const setName = cl.set_name || '';
+    const yearParts = (cl.set_year || '').split('-');
+    const yearShort = yearParts.length >= 2
       ? yearParts[0].slice(-2) + '-' + yearParts[1].slice(-2)
       : yearParts[0] || '';
-    const seriesEn   = setName.includes('Prizm') ? 'Prizm'
+    const seriesEn = setName.includes('Prizm') ? 'Prizm'
       : setName.includes('Chrome') ? 'Chrome'
       : setName.includes('Select') ? 'Select'
       : (cl.brand || '');
-    const seriesCn   = seriesEn.toLowerCase();
-    const yearStart  = yearParts[0] || '';
+    const seriesCn = seriesEn.toLowerCase();
+    const yearStart = yearParts[0] || '';
 
-    const items = missing.map(item => {
-      const nameEn = item.name || '';
-      const numStr = item.print_run ? ('/' + item.print_run) : '';
+    const fc = goal.filter_condition || {};
+    const numStr = fc.max_print_run ? ('/' + fc.max_print_run) : '';
 
-      // 卡淘：越简洁越好
-      // 有编号：中文名 + 短年份 + 系列 + /编号   e.g. 加内特 20-21 prizm /10
-      // 无编号：中文名 + 短年份 + 系列            e.g. 加内特 20-21 prizm
-      const kataoKw = [playerCn, yearShort, seriesCn, numStr].filter(Boolean).join(' ').trim();
+    const kataoKw = [playerCn, yearShort, seriesCn, numStr].filter(Boolean).join(' ').trim();
+    const ebayKw = [(goal.player_name || '').split(' ').pop(), yearStart, seriesEn, numStr].filter(Boolean).join(' ');
 
-      // eBay：姓 + 年份 + 系列英文 + 平行英文 + 编号
-      const ebayKw = [playerLast, yearStart, seriesEn, nameEn, numStr].filter(Boolean).join(' ');
+    if (!kataoKw) continue;
 
-      const desc = [playerLast, nameEn, numStr].filter(Boolean).join(' ');
+    // 检查是否已有该目标的 watch_item
+    const { data: existing } = await supabase.from('watch_items')
+      .select('id').eq('goal_id', goal.id).limit(1);
+    if (existing?.length) continue; // 已有，跳过
 
-      return {
-        source: 'collection_goal',
-        goal_id: goal.id,
-        description: desc,
-        search_keywords_ebay: ebayKw,
-        search_keywords_katao: kataoKw,
-        tier: 'must_watch',
-        status: 'active',
-      };
-    });
-
-    for (let i = 0; i < items.length; i += 50) {
-      const { error } = await supabase.from('watch_items').insert(items.slice(i, i + 50));
-      if (!error) total += items.slice(i, i + 50).length;
-    }
+    const { error } = await supabase.from('watch_items').insert([{
+      source: 'collection_goal',
+      goal_id: goal.id,
+      description: goal.title || kataoKw,
+      search_keywords_ebay: ebayKw,
+      search_keywords_katao: kataoKw,
+      tier: 'must_watch',
+      status: 'active',
+    }]);
+    if (!error) total++;
   }
   return total;
 }

@@ -64,7 +64,11 @@ export default async function handler(req, res) {
       let generated;
       try { generated = await generateChecklistWithAI(set_name, set_year, brand, subset, mode, filter_condition); }
       catch (e) { return res.status(500).json({ error: 'AI生成清单失败: ' + e.message }); }
-      const filterKey = [filter_condition && filter_condition.color ? filter_condition.color : '', filter_condition && filter_condition.max_print_run ? ('pr' + filter_condition.max_print_run) : ''].filter(Boolean).join('_') || 'custom';
+      const filterKey = [
+        filter_condition?.color || '',
+        filter_condition?.max_print_run ? ('pr' + filter_condition.max_print_run) : '',
+        filter_condition?.base_only === false ? 'all' : 'base',
+      ].filter(Boolean).join('_') || 'custom';
       const { data: newCL, error: clErr } = await supabase.from('checklists')
         .insert([{ set_name, set_year: set_year || '', brand: brand || '', subset: 'Filtered_' + filterKey, checklist_type: 'parallels', items: generated }])
         .select().single();
@@ -78,7 +82,6 @@ export default async function handler(req, res) {
 
       if (!checklist) {
         if (mode === 'full_parallels') {
-          // full_parallels 只接受 'Full'，绝不复用残缺的 'Base'
           const { data: existing } = await supabase.from('checklists').select('*')
             .ilike('set_name', '%' + set_name + '%').eq('subset', 'Full').maybeSingle();
           if (existing) checklist = existing;
@@ -92,7 +95,7 @@ export default async function handler(req, res) {
 
       if (!checklist) {
         let generated;
-        try { generated = await generateChecklistWithAI(set_name, set_year, brand, subset, mode, null); }
+        try { generated = await generateChecklistWithAI(set_name, set_year, brand, subset, mode, filter_condition); }
         catch (e) { return res.status(500).json({ error: 'AI生成清单失败: ' + e.message }); }
         const subsetLabel = mode === 'full_parallels' ? 'Full' : (subset || 'Base');
         const { data: newCL, error: clErr } = await supabase.from('checklists')
@@ -103,7 +106,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // ── 2. 全部 items，不过滤任何 tier ───────────────────────────────────
+    // ── 2. 所有 items ─────────────────────────────────────────────────────
     const allItems = checklist.items || [];
 
     // ── 3. 比对已有卡片 ───────────────────────────────────────────────────
@@ -137,12 +140,39 @@ export default async function handler(req, res) {
 
     if (missing.length > 0) await generateWatchItems(goal.id, goal, missing, checklist);
 
-    return res.status(201).json({ ...goal, owned_count: owned.filter(i => i.owned).length, missing_count: missing.length, total_items: owned.length + missing.length, checklist });
+    return res.status(201).json({
+      ...goal,
+      owned_count: owned.filter(i => i.owned).length,
+      missing_count: missing.length,
+      total_items: owned.length + missing.length,
+      checklist,
+    });
   }
 
   if (req.method === 'PUT') {
-    const { id } = req.query;
+    const { id, action } = req.query;
     if (!id) return res.status(400).json({ error: '缺少 id' });
+
+    // ── 从 missing_items 删除单条 ─────────────────────────────────────────
+    if (action === 'remove_item') {
+      const { item_name } = req.body;
+      if (!item_name) return res.status(400).json({ error: '缺少 item_name' });
+
+      const { data: goal, error: ge } = await supabase.from('collection_goals')
+        .select('missing_items, owned_items, total_items').eq('id', id).single();
+      if (ge) return res.status(500).json({ error: ge.message });
+
+      const newMissing = (goal.missing_items || []).filter(i => i.name !== item_name);
+      const newTotal = newMissing.length + (goal.owned_items || []).length;
+
+      const { data, error } = await supabase.from('collection_goals')
+        .update({ missing_items: newMissing, total_items: newTotal, updated_at: new Date().toISOString() })
+        .eq('id', id).select().single();
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(200).json(data);
+    }
+
+    // ── 通用更新 ──────────────────────────────────────────────────────────
     const { data, error } = await supabase.from('collection_goals')
       .update({ ...req.body, updated_at: new Date().toISOString() }).eq('id', id).select().single();
     if (error) return res.status(500).json({ error: error.message });
@@ -203,22 +233,19 @@ function matchesItem(card, item, mode) {
   const iCn = (item.name_cn || '').toLowerCase().trim();
 
   if (cp === iName) return true;
-
-  if (iName.length > 2 && cp.includes(iName)) {
-    if (iName.length / cp.length >= 0.75) return true;
-  }
-  if (cp.length > 2 && iName.includes(cp)) {
-    if (cp.length / iName.length >= 0.75) return true;
-  }
-
+  if (iName.length > 2 && cp.includes(iName) && iName.length / cp.length >= 0.75) return true;
+  if (cp.length > 2 && iName.includes(cp) && cp.length / iName.length >= 0.75) return true;
   if (iCn.length > 1 && cp === iCn) return true;
   if (iCn.length > 1 && cp.includes(iCn) && iCn.length / cp.length >= 0.75) return true;
 
   return false;
 }
 
-// ── 生成 watch_items ──────────────────────────────────────────────────────────
+// ── 生成 watch_items：每个目标只生成 1 条（最宽泛关键词）────────────────────
 async function generateWatchItems(goalId, goal, missingItems, checklist) {
+  // full_players 模式（全球员）不生成搜索条目
+  if (goal.mode === 'full_players') return;
+
   const cl = checklist || {};
   const playerLast = (goal.player_name || '').split(' ').pop() || '';
   const playerCn = goal.player_name_cn || playerLast;
@@ -236,31 +263,30 @@ async function generateWatchItems(goalId, goal, missingItems, checklist) {
     : (cl.brand || '');
   const seriesCn = seriesEn.toLowerCase();
 
-  const items = missingItems.map(item => {
-    const name = item.name || '';
-    const numStr = item.print_run ? ('/' + item.print_run) : '';
+  // 从 filter_condition 提取编号
+  const fc = goal.filter_condition || {};
+  const numStr = fc.max_print_run ? ('/' + fc.max_print_run) : '';
 
-    // 卡淘：越简洁越好
-    // 有编号：加内特 20-21 prizm /10
-    // 无编号：加内特 20-21 prizm
-    const kataoKw = [playerCn, yearShort, seriesCn, numStr].filter(Boolean).join(' ').trim();
-    const ebayKw = [playerLast, yearStart, seriesEn, name, numStr].filter(Boolean).join(' ');
-    const desc = [playerLast, name, numStr].filter(Boolean).join(' ');
+  // 一个目标 = 一条 watch_item，最宽泛关键词
+  // 有编号：加内特 25-26 chrome /50
+  // 无编号：加内特 25-26 chrome
+  const kataoKw = [playerCn, yearShort, seriesCn, numStr].filter(Boolean).join(' ').trim();
+  const ebayKw = [playerLast, yearStart, seriesEn, numStr].filter(Boolean).join(' ');
 
-    return {
-      source: 'collection_goal',
-      goal_id: goalId,
-      description: desc,
-      search_keywords_ebay: ebayKw,
-      search_keywords_katao: kataoKw,
-      tier: 'must_watch',
-      status: 'active',
-    };
-  });
+  if (!kataoKw) return;
 
-  for (let i = 0; i < items.length; i += 50) {
-    await supabase.from('watch_items').insert(items.slice(i, i + 50));
-  }
+  // 先删旧的 watch_items（避免同步时重复）
+  await supabase.from('watch_items').delete().eq('goal_id', goalId);
+
+  await supabase.from('watch_items').insert([{
+    source: 'collection_goal',
+    goal_id: goalId,
+    description: goal.title || kataoKw,
+    search_keywords_ebay: ebayKw,
+    search_keywords_katao: kataoKw,
+    tier: 'must_watch',
+    status: 'active',
+  }]);
 }
 
 // ── 同步已有卡片 ──────────────────────────────────────────────────────────────
@@ -281,20 +307,29 @@ async function syncOwnedCards(goalId, res) {
   }
 
   const { data, error } = await supabase.from('collection_goals')
-    .update({ owned_items: owned.filter(i => i.owned), missing_items: missing, total_items: (cl.items || []).length, updated_at: new Date().toISOString() })
+    .update({
+      owned_items: owned.filter(i => i.owned),
+      missing_items: missing,
+      total_items: (cl.items || []).length,
+      updated_at: new Date().toISOString(),
+    })
     .eq('id', goalId).select().single();
   if (error) return res.status(500).json({ error: error.message });
 
-  await supabase.from('watch_items').delete().eq('goal_id', goalId);
+  // 重建 watch_items（新架构：1条/目标）
   if (missing.length > 0) await generateWatchItems(goalId, { ...goal, checklist: cl }, missing, cl);
 
-  return res.status(200).json({ ...data, owned_count: owned.filter(i => i.owned).length, missing_count: missing.length });
+  return res.status(200).json({
+    ...data,
+    owned_count: owned.filter(i => i.owned).length,
+    missing_count: missing.length,
+  });
 }
 
 // ── AI 生成清单入口 ───────────────────────────────────────────────────────────
 async function generateChecklistWithAI(set_name, set_year, brand, subset, mode, filter_condition) {
   if (mode === 'full_parallels') {
-    return await generateAllSubsetParallels(set_name, set_year);
+    return await generateAllSubsetParallels(set_name, set_year, filter_condition);
   }
 
   if (mode === 'full_players') {
@@ -307,25 +342,39 @@ async function generateChecklistWithAI(set_name, set_year, brand, subset, mode, 
     const fc = filter_condition;
     const printRun = fc.max_print_run ? parseInt(fc.max_print_run) : null;
     const color = fc.color || null;
+    // ✅ 新增：base_only 默认为 true，include_autos 默认为 false
+    const baseOnly = fc.base_only !== false;
+    const includeAutos = fc.include_autos === true;
+
     let condDesc = '';
     if (printRun && color) condDesc = '颜色含"' + color + '"且编号恰好为 /' + printRun;
     else if (printRun) condDesc = '编号恰好为 /' + printRun + ' 的所有平行版本（不限颜色）';
     else if (color) condDesc = '颜色含"' + color + '"的所有平行版本';
     else condDesc = '所有平行版本';
-    const prompt = '你是球星卡专家。列出 "' + set_name + '"（' + (set_year || '') + '赛季）中，' + condDesc + '。务必穷举所有变体。' + (printRun ? '只列编号恰好是 /' + printRun + ' 的版本。' : '') + '返回纯JSON数组，每项：{"name":"版本英文名","name_cn":"版本中文名","numbered":true,"print_run":' + (printRun || '编号数量') + ',"tier":"common/numbered/premium/ultra/1of1"}。只返回JSON数组。';
+
+    // ✅ 构建限制条件描述
+    const restrictions = [];
+    if (baseOnly) restrictions.push('只包含 Base Set 普通球员卡的平行版本，不包含 Insert 特卡');
+    if (!includeAutos) restrictions.push('不包含任何签字卡（Autograph）');
+
+    const restrictionStr = restrictions.length > 0 ? '⚠️ 重要限制：' + restrictions.join('；') + '。' : '';
+
+    const prompt = '你是球星卡专家。列出 "' + set_name + '"（' + (set_year || '') + '赛季）中，' + condDesc + '。' +
+      restrictionStr +
+      (printRun ? '只列编号恰好是 /' + printRun + ' 的版本，不列其他编号。' : '') +
+      '务必穷举所有变体。' +
+      '返回纯JSON数组，每项：{"name":"版本英文名","name_cn":"版本中文名","numbered":true,"print_run":' + (printRun || '编号数量') + ',"tier":"common/numbered/premium/ultra/1of1"}。只返回JSON数组。';
     const r = await anthropic.messages.create({ model: 'claude-sonnet-4-6', max_tokens: 4096, tools: [{ type: 'web_search_20250305', name: 'web_search' }], messages: [{ role: 'user', content: prompt }] });
     return extractJsonArray(r);
   }
 
-  return await generateAllSubsetParallels(set_name, set_year);
+  return await generateAllSubsetParallels(set_name, set_year, filter_condition);
 }
 
 // ── 多子集生成：硬编码已知产品，未知产品 AI 发现 ─────────────────────────────
-async function generateAllSubsetParallels(set_name, set_year) {
-  // 优先用硬编码子集结构（准确可靠）
+async function generateAllSubsetParallels(set_name, set_year, filter_condition) {
   let subsets = getKnownSubsets(set_name);
 
-  // 未知产品才用 AI 发现
   if (!subsets) {
     subsets = ['Base Set'];
     try {
@@ -358,7 +407,11 @@ async function generateAllSubsetParallels(set_name, set_year) {
 
   console.log(`[generateAllSubsetParallels] "${set_name}" 子集:`, JSON.stringify(subsets));
 
-  // 对每个子集单独生成平行清单
+  // ✅ 从 filter_condition 提取选项
+  const fc = filter_condition || {};
+  const includeAutos = fc.include_autos === true;
+  const autoRestriction = includeAutos ? '' : '不包含签字卡（Autograph）；';
+
   const allItems = [];
   for (const subsetName of subsets) {
     try {
@@ -370,7 +423,7 @@ async function generateAllSubsetParallels(set_name, set_year) {
           role: 'user',
           content: `你是球星卡专家。完整列出 "${set_name}"（${set_year || ''}赛季）"${subsetName}" 子集的所有平行版本，务必穷举。
 
-规则：
+⚠️ 重要规则：${autoRestriction}只包含普通球员卡的平行版本，不包含 Insert 特卡
 - "name" 只写颜色/类型，不含品牌前缀（写 "Silver" 不写 "Prizm Silver"）
 - 无编号版本（Silver、Holo 等）必须包含，tier 为 "common"
 - SSP/SP 标注 "ssp": true

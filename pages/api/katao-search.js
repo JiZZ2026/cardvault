@@ -2,10 +2,10 @@
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
-  const { keyword } = req.body;
+  const { keyword, sold } = req.body;
   if (!keyword) return res.status(400).json({ error: '缺少 keyword' });
   try {
-    const results = await searchKatao(keyword);
+    const results = await searchKatao(keyword, sold === true);
     return res.status(200).json({ success: true, keyword, results, total: results.length });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
@@ -13,12 +13,10 @@ export default async function handler(req, res) {
 }
 
 export async function searchKatao(keyword, sold = false) {
-  // 手动构建 URL，保持 [ ] { } 不编码（与浏览器行为一致）
-  // 卡淘服务器对 searchJson 的解析要求方括号不被 %5B%5D 编码
+  // sold=false → Status:1（在售）  sold=true → Status:-2（已售）
   const searchJsonRaw = '[{"Key":"Status","Value":' + (sold ? '-2' : '1') + '}]';
   const keywordEncoded = encodeURIComponent(keyword);
-  const searchJsonEncoded = searchJsonRaw
-    .replace(/"/g, '%22'); // 只编码双引号，保留 [ ] { } : ,
+  const searchJsonEncoded = searchJsonRaw.replace(/"/g, '%22');
 
   const url = 'https://www.cardhobby.com.cn/NewCommodity/SearchCommodity'
     + '?userId='
@@ -27,7 +25,7 @@ export async function searchKatao(keyword, sold = false) {
     + '&searchKey=' + keywordEncoded
     + '&searchJson=' + searchJsonEncoded
     + '&sort=EffectiveTimeStamp'
-    + '&sortType=asc';
+    + '&sortType=desc';           // 最新优先
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000);
@@ -69,7 +67,8 @@ export async function searchKatao(keyword, sold = false) {
       price,
       priceUSD,
       currency: 'RMB',
-      url: 'https://www.cardhobby.com.cn/Market/Details/' + item.ID,
+      // ✅ 修复：使用新的卡淘详情页 URL 格式
+      url: 'https://www.cardhobby.com.cn/market/item/' + item.ID,
       bidCount: item.PriceCount || 0,
       timeLeft,
       listingType,
