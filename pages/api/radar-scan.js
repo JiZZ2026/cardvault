@@ -4,6 +4,12 @@
 import { supabase } from '../../lib/supabase';
 import { searchKatao } from './katao-search';
 
+const AUTO_KEYWORDS = ['autograph', ' auto ', 'auto/', '签字', '签名', 'inscription'];
+function isAutoCard(title) {
+  const t = title.toLowerCase();
+  return AUTO_KEYWORDS.some(kw => t.includes(kw));
+}
+
 export default async function handler(req, res) {
 
   // GET：返回最新在售扫描结果
@@ -46,6 +52,17 @@ export default async function handler(req, res) {
         return res.status(200).json({ success: false, results: [], message: '无监控条目，请先同步目标' });
       }
 
+      // 查目标的 filter_condition，决定是否过滤签字卡
+      let includeAutos = false;
+      if (goal_id) {
+        const { data: goalData } = await supabase
+          .from('collection_goals')
+          .select('filter_condition')
+          .eq('id', goal_id)
+          .single();
+        includeAutos = goalData?.filter_condition?.include_autos === true;
+      }
+
       const results = [];
       const seen = new Set();
       for (const item of watchItems) {
@@ -54,7 +71,9 @@ export default async function handler(req, res) {
         seen.add(kw);
         try {
           const hits = await searchKatao(kw, true); // sold=true
-          for (const r of hits.slice(0, 10)) {
+          for (const r of hits) {
+            // 根据目标的 include_autos 设置决定是否过滤
+            if (!includeAutos && isAutoCard(r.title)) continue;
             results.push({
               id: r.id,
               title: r.title,
@@ -102,19 +121,17 @@ export default async function handler(req, res) {
       });
     }
 
-    // ── 关键词去重：相同关键词只搜一次 ──────────────────────────────────────
     const BATCH = goal_id ? watchItems.length : 20;
     const batch = watchItems.slice(0, BATCH);
 
     let found = 0, scanned = 0;
     const newResults = [];
-    const seenKw = new Set(); // ✅ 去重 set
+    const seenKw = new Set();
 
     for (const item of batch) {
       const kw = (item.search_keywords_katao || '').trim();
       if (!kw) continue;
 
-      // ✅ 相同关键词跳过，不重复搜索
       if (seenKw.has(kw)) {
         console.log(`[radar-scan] 跳过重复关键词: "${kw}"`);
         continue;
@@ -123,7 +140,7 @@ export default async function handler(req, res) {
       scanned++;
 
       try {
-        const results = await searchKatao(kw, false); // sold=false，在售
+        const results = await searchKatao(kw, false);
         found += results.length;
         for (const r of results.slice(0, 10)) {
           newResults.push({
@@ -158,9 +175,7 @@ export default async function handler(req, res) {
       await sleep(500);
     }
 
-    // 写入结果（先清旧结果，再插新结果）
     if (newResults.length > 0) {
-      // 只清涉及到的 watch_item_id 的旧结果
       const affectedIds = [...new Set(newResults.map(r => r.watch_item_id))];
       await supabase.from('scan_results').delete().in('watch_item_id', affectedIds);
       await supabase.from('scan_results').insert(newResults);
@@ -199,7 +214,7 @@ async function rebuildWatchItems() {
   let total = 0;
 
   for (const goal of goals) {
-    if (goal.mode === 'full_players') continue; // full_players 暂不生成搜索条目
+    if (goal.mode === 'full_players') continue;
 
     const cl = goal.checklist || {};
     const playerCn = goal.player_name_cn || (goal.player_name || '').split(' ').pop() || '';
@@ -223,10 +238,9 @@ async function rebuildWatchItems() {
 
     if (!kataoKw) continue;
 
-    // 检查是否已有该目标的 watch_item
     const { data: existing } = await supabase.from('watch_items')
       .select('id').eq('goal_id', goal.id).limit(1);
-    if (existing?.length) continue; // 已有，跳过
+    if (existing?.length) continue;
 
     const { error } = await supabase.from('watch_items').insert([{
       source: 'collection_goal',
