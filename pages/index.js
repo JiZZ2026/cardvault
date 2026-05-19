@@ -1463,7 +1463,7 @@ function GoalCard({ goal, onDelete, onSync, onRefresh, onScanDone }) {
             <div style={{ marginBottom:10 }}>
               <div style={{ fontSize:10, color:T.dim, fontFamily:"'Space Mono',monospace", letterSpacing:1, marginBottom:8 }}>SOLD · 近期成交</div>
               {soldResults.length === 0 && <div style={{ fontSize:12, color:T.muted, padding:"8px 0" }}>暂无已售记录</div>}
-              {soldResults.slice(0, 10).map((r, i) => (
+              {soldResults.map((r, i) => (
                 <div key={i} style={{ display:"flex", gap:8, padding:"8px 0", borderBottom: i < soldResults.length - 1 ? `1px solid ${T.border}` : "none", alignItems:"center" }}>
                   {r.image_url && <img src={r.image_url} alt="" style={{ width:36, height:50, objectFit:"contain", borderRadius:4, flexShrink:0 }} />}
                   <div style={{ flex:1, minWidth:0 }}>
