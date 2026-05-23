@@ -205,6 +205,24 @@ const apiRadarScanSold = async (goal_id = null) => {
   return r.ok ? d : { success:false, results:[] };
 };
 
+// ── 投资分析 API ───────────────────────────────────────────────────────────────
+const apiGetInvestments = async () => { const r = await fetch("/api/investments"); if (!r.ok) return []; return r.json(); };
+const apiCreateInvestment = async (body) => { const r = await fetch("/api/investments", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) }); const d = await r.json(); if (!r.ok) throw new Error(d.error || "创建失败"); return d; };
+const apiUpdateInvestment = async (id, body) => { const r = await fetch(`/api/investments?id=${id}`, { method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) }); const d = await r.json(); if (!r.ok) throw new Error(d.error || "更新失败"); return d; };
+const apiCloseInvestment = async (id) => { const r = await fetch(`/api/investments?id=${id}`, { method:"DELETE" }); const d = await r.json(); if (!r.ok) throw new Error(d.error || "关闭失败"); return d; };
+const apiGetInvestment = async (id) => { const r = await fetch(`/api/investments/${id}`); if (!r.ok) return null; return r.json(); };
+const apiAddCheckpoint = async (id, body) => { const r = await fetch(`/api/investments/${id}?action=checkpoint`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) }); const d = await r.json(); if (!r.ok) throw new Error(d.error || "添加失败"); return d; };
+const apiLinkCard = async (id, body) => { const r = await fetch(`/api/investments/${id}?action=link-card`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) }); const d = await r.json(); if (!r.ok) throw new Error(d.error || "关联失败"); return d; };
+
+// 投资类型 / 行动分工具
+const INV_TYPE = {
+  pc:          { label:"PC 永久收藏", short:"PC",  color:T.gold,    emoji:"❤️" },
+  investment:  { label:"投资",        short:"投资", color:T.blue,    emoji:"📈" },
+  speculation: { label:"投机",        short:"投机", color:"#9B6DFF", emoji:"🎲" },
+};
+const actionColor = (s) => { if (s == null) return T.dim; if (s >= 75) return T.green; if (s >= 60) return T.gold; if (s >= 40) return T.orange; return T.red; };
+const actionAdvice = (s) => { if (s == null) return "未评分"; if (s >= 75) return "强力买入 / 加仓"; if (s >= 60) return "可逢低吸纳"; if (s >= 40) return "持有观望"; return "减仓 / 规避"; };
+
 // ── Context ──────────────────────────────────────────────────────────────────
 const Ctx = createContext(null);
 const useApp = () => useContext(Ctx);
@@ -591,6 +609,13 @@ function AddScreen() {
     const [tf,tb]=await Promise.all([front?mkThumb(front):null,back?mkThumb(back):null]);
     const status=form.sell_price?"sold":form.status;
     await addCard({...form,buy_price:form.buy_price?parseFloat(form.buy_price):null,sell_price:form.sell_price?parseFloat(form.sell_price):null,is_one_of_one:!!form.is_one_of_one,is_rc:!!form.is_rc,numbered:form.numbered||null,sub_series:form.sub_series||null,grade_company:form.grade_company||null,grade_score:form.grade_score||null,pc_player:form.category==="PC"?form.player:null,front_image:tf,back_image:tb,tags,notes:form.notes||"",status});
+    if(rec){
+      const diffFields=["player","series","parallel","numbered","year"];
+      const orig={player:rec.player||"",series:rec.series||"",parallel:rec.parallel||"",numbered:rec.numbered||"",year:rec.year||""};
+      const corr={player:form.player||"",series:form.series||"",parallel:form.parallel||"",numbered:form.numbered||"",year:form.year||""};
+      const hasDiff=diffFields.some(f=>orig[f]!==corr[f]);
+      if(hasDiff){try{await fetch("/api/recognition-corrections",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({original:orig,corrected:corr})})}catch(e){console.error("纠错记录失败:",e)}}
+    }
     setSaving(false); nav("home");
   };
 
@@ -1668,10 +1693,460 @@ function NewGoalScreen({ pcP, onDone, onBack }) {
   );
 }
 
+// ── 投资分析模块 ───────────────────────────────────────────────────────────────
+const cny = (n) => `¥${Math.round(Number(n) || 0).toLocaleString("zh-CN")}`;
+
+// 行动分数字（带颜色编码）
+function ScoreNum({ label, value, big, color }) {
+  const c = color || T.gold;
+  return (
+    <div style={{ textAlign:"center", flex:1 }}>
+      <div style={{ fontFamily:"'Space Mono',monospace", fontSize: big ? 40 : 18, fontWeight:700, color: value == null ? T.dim : c, lineHeight:1 }}>{value == null ? "—" : value}</div>
+      <div style={{ fontFamily:"'Space Mono',monospace", fontSize:9, color:T.dim, letterSpacing:1, marginTop: big ? 8 : 4 }}>{label}</div>
+    </div>
+  );
+}
+
+// 0-100 滑块
+function ScoreSlider({ label, value, onChange, color }) {
+  const c = color || T.gold;
+  return (
+    <div style={{ marginBottom:18 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:8 }}>
+        <span style={{ fontFamily:"'Space Mono',monospace", fontSize:11, color:T.muted, letterSpacing:0.5 }}>{label}</span>
+        <span style={{ fontFamily:"'Space Mono',monospace", fontSize:22, fontWeight:700, color:c }}>{value}</span>
+      </div>
+      <input type="range" min={0} max={100} value={value} onChange={e => onChange(parseInt(e.target.value))}
+        style={{ width:"100%", accentColor:c, cursor:"pointer", height:6 }} />
+    </div>
+  );
+}
+
+function InvestmentScreen() {
+  const { cards } = useApp();
+  const [view, setView] = useState("list"); // list | new | detail
+  const [detailId, setDetailId] = useState(null);
+  const [investments, setInvestments] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = async () => { setLoading(true); const d = await apiGetInvestments(); setInvestments(Array.isArray(d) ? d : []); setLoading(false); };
+  useEffect(() => { load(); }, []);
+
+  if (view === "new") return <NewInvestmentScreen onBack={() => setView("list")} onDone={() => { setView("list"); load(); }} />;
+  if (view === "detail" && detailId) return <InvestmentDetailScreen id={detailId} cards={cards} onBack={() => { setView("list"); load(); }} />;
+
+  const dist = { strong:0, mid:0, weak:0, avoid:0 };
+  investments.forEach(i => { const s = i.action_score; if (s == null) return; if (s >= 75) dist.strong++; else if (s >= 60) dist.mid++; else if (s >= 40) dist.weak++; else dist.avoid++; });
+  const totalPositions = investments.reduce((s, i) => s + (i.position_count || 0), 0);
+  const totalCost = investments.reduce((s, i) => s + (i.total_cost || 0), 0);
+
+  return (
+    <div style={{ paddingBottom:90 }}>
+      <div style={{ padding:"20px 20px 0", display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+        <div>
+          <h2 style={{ fontSize:24, fontWeight:700, color:T.text, letterSpacing:"-0.5px" }}>📈 投资分析</h2>
+          <p style={{ fontSize:12, color:T.muted, marginTop:3 }}>{investments.length} 个活跃追踪 · THESIS-CHECK-EXIT</p>
+        </div>
+        <button onClick={() => setView("new")} style={{ width:38, height:38, borderRadius:"50%", border:"none", background:`linear-gradient(135deg,${T.gold},${T.goldDark})`, color:"#000", fontSize:20, fontWeight:700, cursor:"pointer", flexShrink:0 }}>+</button>
+      </div>
+
+      <div style={{ padding:"16px 20px 0" }}>
+        {/* Portfolio 概览 */}
+        <div style={{ background:`linear-gradient(135deg,rgba(201,168,76,0.08),rgba(201,168,76,0.03))`, border:`1px solid ${T.borderGold}`, borderRadius:16, padding:"16px", marginBottom:16 }}>
+          <div style={{ fontFamily:"'Space Mono',monospace", fontSize:10, color:T.dim, letterSpacing:1, marginBottom:12 }}>PORTFOLIO</div>
+          <div style={{ display:"flex", marginBottom:14 }}>
+            <ScoreNum label="活跃追踪" value={investments.length} />
+            <ScoreNum label="持仓卡片" value={totalPositions} />
+            <div style={{ textAlign:"center", flex:1 }}>
+              <div style={{ fontFamily:"'Space Mono',monospace", fontSize:18, fontWeight:700, color:T.gold, lineHeight:1 }}>{cny(totalCost)}</div>
+              <div style={{ fontFamily:"'Space Mono',monospace", fontSize:9, color:T.dim, letterSpacing:1, marginTop:4 }}>总成本</div>
+            </div>
+          </div>
+          <div style={{ display:"flex", gap:6 }}>
+            {[["强", dist.strong, T.green],["中", dist.mid, T.gold],["弱", dist.weak, T.orange],["避", dist.avoid, T.red]].map(([l, v, c], i) => (
+              <div key={i} style={{ flex:1, textAlign:"center", padding:"6px 0", borderRadius:8, background:`${c}12`, border:`1px solid ${c}33` }}>
+                <span style={{ fontFamily:"'Space Mono',monospace", fontSize:14, fontWeight:700, color:c }}>{v}</span>
+                <span style={{ fontSize:9, color:T.dim, marginLeft:4 }}>{l}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {loading && [1, 2].map(i => <Skel key={i} height={92} radius={14} style={{ marginBottom:10 }} />)}
+        {!loading && investments.length === 0 && (
+          <div style={{ background:T.s2, borderRadius:16, padding:28, textAlign:"center" }}>
+            <div style={{ fontSize:40, marginBottom:12 }}>📊</div>
+            <div style={{ fontSize:14, color:T.text, marginBottom:6 }}>还没有投资追踪</div>
+            <div style={{ fontSize:12, color:T.muted, lineHeight:1.7 }}>用 THESIS-CHECK-EXIT 框架记录你的建仓逻辑，给球员打 Q/T 双分，系统帮你算出行动分</div>
+            <button onClick={() => setView("new")} style={{ marginTop:16, padding:"10px 20px", borderRadius:10, border:"none", background:`linear-gradient(135deg,${T.gold},${T.goldDark})`, color:"#000", fontSize:13, fontWeight:700, cursor:"pointer" }}>+ 新建投资追踪</button>
+          </div>
+        )}
+        {!loading && investments.map(inv => (
+          <InvestmentCard key={inv.id} inv={inv} onClick={() => { setDetailId(inv.id); setView("detail"); }} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function InvestmentCard({ inv, onClick }) {
+  const ty = INV_TYPE[inv.investment_type] || INV_TYPE.investment;
+  const ac = actionColor(inv.action_score);
+  return (
+    <div onClick={onClick} style={{ background:T.s2, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", marginBottom:10, cursor:"pointer", transition:"all 0.15s" }}
+      onMouseEnter={e => e.currentTarget.style.borderColor = T.borderGold} onMouseLeave={e => e.currentTarget.style.borderColor = T.border}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:12 }}>
+        <div style={{ minWidth:0, flex:1 }}>
+          <div style={{ fontSize:15, fontWeight:700, color:T.text }}>{inv.player_name_cn || inv.player_name}</div>
+          <div style={{ fontSize:11, color:T.muted, marginTop:2 }}>{inv.player_name_cn ? inv.player_name : ""}</div>
+        </div>
+        <Chip label={`${ty.emoji} ${ty.short}`} color={ty.color} />
+      </div>
+      <div style={{ display:"flex", alignItems:"center", gap:4, padding:"10px 0", borderTop:`1px solid ${T.border}`, borderBottom:`1px solid ${T.border}` }}>
+        <ScoreNum label="Q 质量" value={inv.q_score} />
+        <span style={{ color:T.dim, fontSize:14 }}>·</span>
+        <ScoreNum label="T 时机" value={inv.t_score} />
+        <span style={{ color:T.dim, fontSize:14 }}>=</span>
+        <ScoreNum label="行动分" value={inv.action_score} color={ac} />
+      </div>
+      <div style={{ display:"flex", justifyContent:"space-between", marginTop:10, fontSize:11, color:T.muted }}>
+        <span>🃏 {inv.position_count || 0} 张持仓</span>
+        <span style={{ fontFamily:"'Space Mono',monospace", color:T.gold }}>{cny(inv.total_cost)}</span>
+      </div>
+    </div>
+  );
+}
+
+function NewInvestmentScreen({ onBack, onDone }) {
+  const [step, setStep] = useState(1);
+  const [playerName, setPlayerName] = useState("");
+  const [playerNameCn, setPlayerNameCn] = useState("");
+  const [type, setType] = useState("");
+  const [thesis, setThesis] = useState("");
+  const [exitRules, setExitRules] = useState({ profit_target:"", stop_loss:"", time_stop_months:"" });
+  const [q, setQ] = useState(50);
+  const [t, setT] = useState(50);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  const action = Math.min(q, t);
+  const ac = actionColor(action);
+  const needExit = type === "investment";
+
+  const next = () => {
+    setErr("");
+    if (step === 1) { if (!playerName && !playerNameCn) { setErr("请填写球员名"); return; } if (!type) { setErr("请选择投资类型"); return; } }
+    if (step === 2) { if (!thesis.trim()) { setErr("请写下你的建仓逻辑（THESIS）"); return; } }
+    if (step === 3 && needExit) {
+      if (!exitRules.profit_target && !exitRules.stop_loss && !exitRules.time_stop_months) { setErr("投资类型必须填写 EXIT 规则"); return; }
+    }
+    setStep(s => s + 1);
+  };
+
+  const save = async () => {
+    setSaving(true); setErr("");
+    const exit = (needExit || exitRules.profit_target || exitRules.stop_loss || exitRules.time_stop_months) ? {
+      ...(exitRules.profit_target ? { profit_target: parseFloat(exitRules.profit_target) } : {}),
+      ...(exitRules.stop_loss ? { stop_loss: parseFloat(exitRules.stop_loss) } : {}),
+      ...(exitRules.time_stop_months ? { time_stop_months: parseInt(exitRules.time_stop_months) } : {}),
+    } : [];
+    try {
+      await apiCreateInvestment({
+        player_name: playerName || playerNameCn,
+        player_name_cn: playerNameCn || null,
+        investment_type: type,
+        thesis_text: thesis.trim(),
+        exit_rules: exit,
+        q_score: q,
+        t_score: t,
+      });
+      onDone();
+    } catch (e) { setErr(e.message); setSaving(false); }
+  };
+
+  const STEPS = ["球员", "THESIS", "EXIT", "评分"];
+
+  return (
+    <div style={{ paddingBottom:90 }}>
+      <div style={{ padding:"16px 20px", display:"flex", alignItems:"center", gap:14, borderBottom:`1px solid ${T.border}`, position:"sticky", top:0, background:T.bg, zIndex:10 }}>
+        <button onClick={() => step === 1 ? onBack() : setStep(s => s - 1)} style={{ background:"none", border:"none", color:T.muted, fontSize:20, cursor:"pointer" }}>←</button>
+        <span style={{ fontFamily:"'Space Mono',monospace", fontSize:11, color:T.dim, letterSpacing:1 }}>新建投资追踪</span>
+      </div>
+
+      <div style={{ padding:"20px" }}>
+        {/* 步骤指示 */}
+        <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:24 }}>
+          {STEPS.map((l, i) => {
+            const n = i + 1, done = n < step, act = n === step;
+            return <div key={l} style={{ display:"flex", alignItems:"center", gap:6 }}>
+              <div style={{ width:26, height:26, borderRadius:"50%", background: act ? "linear-gradient(135deg,#C9A84C,#8B6914)" : done ? "rgba(48,209,88,0.2)" : T.s2, border:`1px solid ${act ? T.borderGold : done ? "rgba(48,209,88,0.4)" : T.border}`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Space Mono',monospace", fontSize:10, fontWeight:700, color: act ? "#000" : done ? T.green : T.dim }}>{done ? "✓" : n}</div>
+              <span style={{ fontSize:11, color: act ? T.gold : T.dim }}>{l}</span>
+              {i < STEPS.length - 1 && <div style={{ width:14, height:1, background:T.border }} />}
+            </div>;
+          })}
+        </div>
+
+        {err && <div style={{ padding:"10px 14px", borderRadius:10, background:"rgba(212,80,80,0.08)", border:"1px solid rgba(212,80,80,0.2)", fontSize:12, color:T.red, marginBottom:14 }}>{err}</div>}
+
+        {/* Step 1：球员 + 类型 */}
+        {step === 1 && (
+          <div style={{ animation:"fadeUp 0.3s ease both" }}>
+            <div style={{ fontSize:16, fontWeight:600, color:T.text, marginBottom:16 }}>追踪哪位球员？</div>
+            <FF label="球员中文名"><Inp value={playerNameCn} onChange={setPlayerNameCn} placeholder="如 文班亚马" /></FF>
+            <FF label="球员英文名"><Inp value={playerName} onChange={setPlayerName} placeholder="如 Victor Wembanyama" /></FF>
+            <div style={{ fontFamily:"'Space Mono',monospace", fontSize:10, color:T.dim, letterSpacing:0.8, margin:"10px 0 8px" }}>投资类型 *</div>
+            {Object.entries(INV_TYPE).map(([k, v]) => (
+              <div key={k} onClick={() => setType(k)} style={{ display:"flex", gap:12, alignItems:"center", padding:"14px", borderRadius:12, border:`1px solid ${type === k ? T.borderGold : T.border}`, background: type === k ? "rgba(200,168,75,0.06)" : T.s2, marginBottom:10, cursor:"pointer", transition:"all 0.2s" }}>
+                <span style={{ fontSize:24 }}>{v.emoji}</span>
+                <div><div style={{ fontSize:14, fontWeight:600, color:T.text }}>{v.label}</div>
+                  <div style={{ fontSize:11, color:T.muted, marginTop:2 }}>{k === "pc" ? "永久收藏，不为卖出，可跳过 EXIT" : k === "investment" ? "为获利建仓，必须设定 EXIT 纪律" : "高风险博弈，赌叙事爆发"}</div></div>
+              </div>
+            ))}
+            <button onClick={next} style={{ width:"100%", padding:"13px", borderRadius:12, border:"none", background:`linear-gradient(135deg,${T.gold},${T.goldDark})`, color:"#000", fontSize:14, fontWeight:700, marginTop:8, cursor:"pointer" }}>下一步：写 THESIS →</button>
+          </div>
+        )}
+
+        {/* Step 2：THESIS */}
+        {step === 2 && (
+          <div style={{ animation:"fadeUp 0.3s ease both" }}>
+            <div style={{ fontSize:16, fontWeight:600, color:T.text, marginBottom:4 }}>建仓逻辑 THESIS</div>
+            <div style={{ fontSize:12, color:T.muted, marginBottom:14, lineHeight:1.6 }}>写下你的建仓逻辑：为什么看好这个球员？基本面、叙事面、卡市面各有什么支撑？</div>
+            <textarea value={thesis} onChange={e => setThesis(e.target.value)} placeholder="例：文班是十年一遇的天赋模板，防守端历史级，进攻持续进化（基本面）；联盟力捧的门面级新星，话题度拉满（叙事面）；新秀卡价格已从峰值回落，RC 窗口仍在（卡市面）……"
+              rows={9} style={{ width:"100%", padding:"12px", border:`1px solid ${T.border}`, borderRadius:10, background:T.s3, color:T.text, fontSize:13, lineHeight:1.7, outline:"none", resize:"vertical", fontFamily:"'Inter','Noto Sans SC',sans-serif" }}
+              onFocus={e => e.target.style.borderColor = T.gold} onBlur={e => e.target.style.borderColor = T.border} />
+            <button onClick={next} style={{ width:"100%", padding:"13px", borderRadius:12, border:"none", background:`linear-gradient(135deg,${T.gold},${T.goldDark})`, color:"#000", fontSize:14, fontWeight:700, marginTop:12, cursor:"pointer" }}>下一步：设定 EXIT →</button>
+          </div>
+        )}
+
+        {/* Step 3：EXIT */}
+        {step === 3 && (
+          <div style={{ animation:"fadeUp 0.3s ease both" }}>
+            <div style={{ fontSize:16, fontWeight:600, color:T.text, marginBottom:4 }}>EXIT 退出纪律</div>
+            <div style={{ fontSize:12, color:T.muted, marginBottom:16, lineHeight:1.6 }}>
+              {needExit ? "投资类型必须预设退出规则，避免被情绪绑架。" : "PC / 投机可跳过，但建议也设一道防线。"}
+            </div>
+            <FF label="获利目标 %" required={needExit}><Inp value={exitRules.profit_target} onChange={v => setExitRules(r => ({ ...r, profit_target:v }))} placeholder="如 50（涨 50% 考虑止盈）" type="number" /></FF>
+            <FF label="止损线 %" required={needExit}><Inp value={exitRules.stop_loss} onChange={v => setExitRules(r => ({ ...r, stop_loss:v }))} placeholder="如 30（跌 30% 止损）" type="number" /></FF>
+            <FF label="时间止损（月）" required={needExit}><Inp value={exitRules.time_stop_months} onChange={v => setExitRules(r => ({ ...r, time_stop_months:v }))} placeholder="如 18（持有满 18 个月重新评估）" type="number" /></FF>
+            <div style={{ display:"flex", gap:10, marginTop:8 }}>
+              {!needExit && <button onClick={() => setStep(4)} style={{ flex:1, padding:"13px", borderRadius:12, border:`1px solid ${T.border}`, background:T.s2, color:T.muted, fontSize:14, fontWeight:600, cursor:"pointer" }}>跳过</button>}
+              <button onClick={next} style={{ flex:2, padding:"13px", borderRadius:12, border:"none", background:`linear-gradient(135deg,${T.gold},${T.goldDark})`, color:"#000", fontSize:14, fontWeight:700, cursor:"pointer" }}>下一步：打分 →</button>
+            </div>
+          </div>
+        )}
+
+        {/* Step 4：Q/T 评分 */}
+        {step === 4 && (
+          <div style={{ animation:"fadeUp 0.3s ease both" }}>
+            <div style={{ fontSize:16, fontWeight:600, color:T.text, marginBottom:4 }}>Q / T 双分制</div>
+            <div style={{ fontSize:12, color:T.muted, marginBottom:20, lineHeight:1.6 }}>Q = 资产质量（球员基本面 + 卡的稀有度）；T = 入场时机（当前价格 vs 价值）。行动分 = min(Q, T)，短板决定上限。</div>
+            <ScoreSlider label="Q 资产质量" value={q} onChange={setQ} color={T.blue} />
+            <ScoreSlider label="T 入场时机" value={t} onChange={setT} color={T.gold} />
+            <div style={{ background:`linear-gradient(135deg,${ac}18,transparent)`, border:`1px solid ${ac}55`, borderRadius:16, padding:"20px", textAlign:"center", margin:"16px 0" }}>
+              <div style={{ fontFamily:"'Space Mono',monospace", fontSize:10, color:T.dim, letterSpacing:1, marginBottom:8 }}>ACTION SCORE = min(Q, T)</div>
+              <div style={{ fontFamily:"'Space Mono',monospace", fontSize:48, fontWeight:700, color:ac, lineHeight:1 }}>{action}</div>
+              <div style={{ fontSize:14, fontWeight:700, color:ac, marginTop:8 }}>{actionAdvice(action)}</div>
+            </div>
+            <button onClick={save} disabled={saving} style={{ width:"100%", padding:"14px", borderRadius:14, border:"none", background: saving ? T.s3 : `linear-gradient(135deg,${T.gold},${T.goldDark})`, color: saving ? T.dim : "#000", fontSize:15, fontWeight:700, cursor: saving ? "default" : "pointer" }}>{saving ? "创建中..." : "✓ 创建投资追踪"}</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function InvestmentDetailScreen({ id, cards, onBack }) {
+  const [inv, setInv] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [panel, setPanel] = useState(null); // checkpoint | score | link
+  const [busy, setBusy] = useState(false);
+
+  // panel 表单 state
+  const [cpTitle, setCpTitle] = useState("");
+  const [cpDesc, setCpDesc] = useState("");
+  const [cpDecision, setCpDecision] = useState("");
+  const [sq, setSq] = useState(50);
+  const [st, setSt] = useState(50);
+
+  const load = async () => { setLoading(true); const d = await apiGetInvestment(id); setInv(d); if (d) { setSq(d.q_score ?? 50); setSt(d.t_score ?? 50); } setLoading(false); };
+  useEffect(() => { load(); }, [id]);
+
+  if (loading) return <div style={{ padding:"60px 20px", textAlign:"center", color:T.dim }}>加载中...</div>;
+  if (!inv) return <div style={{ padding:"60px 20px", textAlign:"center", color:T.dim }}>未找到该投资 <button onClick={onBack} style={{ display:"block", margin:"16px auto 0", color:T.gold, background:"none", border:"none", cursor:"pointer" }}>← 返回</button></div>;
+
+  const ty = INV_TYPE[inv.investment_type] || INV_TYPE.investment;
+  const ac = actionColor(inv.action_score);
+  const exit = inv.exit_rules && !Array.isArray(inv.exit_rules) ? inv.exit_rules : null;
+  const myCards = (cards || []).filter(c => c.player && (c.player === inv.player_name || (inv.player_name_cn && c.player.includes(inv.player_name_cn))));
+  const linkedIds = new Set((inv.positions || []).map(p => p.card_id).filter(Boolean));
+
+  const saction = Math.min(sq, st);
+
+  const addCheckpoint = async () => {
+    if (!cpTitle.trim()) return;
+    setBusy(true);
+    try { await apiAddCheckpoint(id, { title:cpTitle.trim(), description:cpDesc.trim() || null, decision:cpDecision.trim() || null, trigger_type:"manual" }); setCpTitle(""); setCpDesc(""); setCpDecision(""); setPanel(null); await load(); }
+    catch (e) { alert(e.message); }
+    setBusy(false);
+  };
+  const updateScore = async () => {
+    setBusy(true);
+    try { await apiUpdateInvestment(id, { q_score:sq, t_score:st }); setPanel(null); await load(); }
+    catch (e) { alert(e.message); }
+    setBusy(false);
+  };
+  const linkCard = async (c) => {
+    setBusy(true);
+    const desc = [c.year, c.series, c.parallel, c.numbered].filter(Boolean).join(" ") || c.player;
+    try { await apiLinkCard(id, { card_id:c.id, card_description:desc, card_tier:c.parallel || null, cost_basis:c.buy_price ?? null, current_value:c.sell_price ?? null, purchase_date:c.buy_date || null }); await load(); }
+    catch (e) { alert(e.message); }
+    setBusy(false);
+  };
+  const closeInv = async () => {
+    if (!window.confirm("确认关闭这个投资追踪？")) return;
+    setBusy(true);
+    try { await apiCloseInvestment(id); onBack(); }
+    catch (e) { alert(e.message); setBusy(false); }
+  };
+
+  const fmtDate = iso => { if (!iso) return ""; const d = new Date(iso); return d.toLocaleDateString("zh-CN", { year:"numeric", month:"numeric", day:"numeric" }); };
+
+  return (
+    <div style={{ paddingBottom:100 }}>
+      <div style={{ padding:"16px 20px", display:"flex", alignItems:"center", gap:14, borderBottom:`1px solid ${T.border}`, position:"sticky", top:0, background:T.bg, zIndex:10 }}>
+        <button onClick={onBack} style={{ background:"none", border:"none", color:T.muted, fontSize:20, cursor:"pointer" }}>←</button>
+        <span style={{ fontFamily:"'Space Mono',monospace", fontSize:11, color:T.dim, letterSpacing:1 }}>投资详情</span>
+      </div>
+
+      <div style={{ padding:"20px" }}>
+        {/* 球员头部 */}
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:16 }}>
+          <div>
+            <div style={{ fontSize:22, fontWeight:700, color:T.text }}>{inv.player_name_cn || inv.player_name}</div>
+            <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>{inv.player_name_cn ? inv.player_name : ""}</div>
+          </div>
+          <Chip label={`${ty.emoji} ${ty.label}`} color={ty.color} />
+        </div>
+
+        {/* Q/T/行动分 大号 */}
+        <div style={{ background:`linear-gradient(135deg,${ac}14,transparent)`, border:`1px solid ${ac}44`, borderRadius:16, padding:"20px 16px", marginBottom:16 }}>
+          <div style={{ display:"flex", alignItems:"center" }}>
+            <ScoreNum label="Q 质量" value={inv.q_score} big color={T.blue} />
+            <span style={{ color:T.dim, fontSize:24, fontWeight:300 }}>·</span>
+            <ScoreNum label="T 时机" value={inv.t_score} big color={T.gold} />
+            <span style={{ color:T.dim, fontSize:24, fontWeight:300 }}>=</span>
+            <ScoreNum label="行动分" value={inv.action_score} big color={ac} />
+          </div>
+          <div style={{ textAlign:"center", marginTop:14, fontSize:13, fontWeight:700, color:ac }}>{actionAdvice(inv.action_score)}</div>
+        </div>
+
+        {/* THESIS */}
+        <div style={{ background:T.s2, border:`1px solid ${T.border}`, borderRadius:14, padding:"16px", marginBottom:14 }}>
+          <div style={{ fontFamily:"'Space Mono',monospace", fontSize:10, color:T.dim, letterSpacing:1, marginBottom:10 }}>THESIS · 建仓逻辑</div>
+          <div style={{ fontSize:13, color:T.text, lineHeight:1.8, whiteSpace:"pre-wrap" }}>{inv.thesis_text || "—"}</div>
+        </div>
+
+        {/* EXIT 规则 */}
+        {exit && (
+          <div style={{ background:T.s2, border:`1px solid ${T.border}`, borderRadius:14, padding:"16px", marginBottom:14 }}>
+            <div style={{ fontFamily:"'Space Mono',monospace", fontSize:10, color:T.dim, letterSpacing:1, marginBottom:12 }}>EXIT · 退出纪律</div>
+            <div style={{ display:"flex", gap:8 }}>
+              {[["获利目标", exit.profit_target != null ? `+${exit.profit_target}%` : "—", T.green],["止损线", exit.stop_loss != null ? `-${exit.stop_loss}%` : "—", T.red],["时间止损", exit.time_stop_months != null ? `${exit.time_stop_months}月` : "—", T.gold]].map(([l, v, c], i) => (
+                <div key={i} style={{ flex:1, textAlign:"center", padding:"10px 4px", borderRadius:10, background:T.s3 }}>
+                  <div style={{ fontFamily:"'Space Mono',monospace", fontSize:15, fontWeight:700, color:c }}>{v}</div>
+                  <div style={{ fontSize:9, color:T.dim, marginTop:3 }}>{l}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 关联持仓 */}
+        <div style={{ background:T.s2, border:`1px solid ${T.border}`, borderRadius:14, padding:"16px", marginBottom:14 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+            <span style={{ fontFamily:"'Space Mono',monospace", fontSize:10, color:T.dim, letterSpacing:1 }}>持仓 · {(inv.positions || []).length} 张</span>
+            <button onClick={() => setPanel(panel === "link" ? null : "link")} style={{ background:"none", border:"none", color:T.gold, fontSize:12, fontWeight:600, cursor:"pointer" }}>{panel === "link" ? "收起" : "+ 关联卡片"}</button>
+          </div>
+          {(inv.positions || []).length === 0 && panel !== "link" && <div style={{ fontSize:12, color:T.dim, textAlign:"center", padding:"8px 0" }}>还没有关联持仓</div>}
+          {(inv.positions || []).map(p => (
+            <div key={p.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 0", borderTop:`1px solid ${T.border}` }}>
+              <div style={{ minWidth:0, flex:1 }}><div style={{ fontSize:13, color:T.text }}>{p.card_description}</div>{p.card_tier && <div style={{ fontSize:10, color:T.muted, marginTop:2 }}>{p.card_tier}</div>}</div>
+              {p.cost_basis != null && <span style={{ fontFamily:"'Space Mono',monospace", fontSize:12, color:T.gold, flexShrink:0, marginLeft:10 }}>{cny(p.cost_basis)}</span>}
+            </div>
+          ))}
+          {panel === "link" && (
+            <div style={{ marginTop:12, borderTop:`1px solid ${T.border}`, paddingTop:12, animation:"fadeUp 0.2s ease both" }}>
+              <div style={{ fontSize:11, color:T.muted, marginBottom:10 }}>从你的收藏中选择 {inv.player_name_cn || inv.player_name} 的卡片：</div>
+              {myCards.length === 0 && <div style={{ fontSize:12, color:T.dim, textAlign:"center", padding:"8px 0" }}>收藏里没有匹配该球员的卡片</div>}
+              {myCards.map(c => {
+                const linked = linkedIds.has(c.id);
+                return <div key={c.id} onClick={() => !linked && !busy && linkCard(c)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 12px", borderRadius:10, background:T.s3, marginBottom:8, cursor: linked ? "default" : "pointer", opacity: linked ? 0.5 : 1 }}>
+                  <div style={{ minWidth:0, flex:1 }}><div style={{ fontSize:12, color:T.text }}>{[c.year, c.series, c.parallel, c.numbered].filter(Boolean).join(" ")}</div></div>
+                  <span style={{ fontSize:11, color: linked ? T.muted : T.gold, fontWeight:700, flexShrink:0, marginLeft:10 }}>{linked ? "已关联" : "+ 关联"}</span>
+                </div>;
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* 检查点时间线 */}
+        <div style={{ background:T.s2, border:`1px solid ${T.border}`, borderRadius:14, padding:"16px", marginBottom:14 }}>
+          <div style={{ fontFamily:"'Space Mono',monospace", fontSize:10, color:T.dim, letterSpacing:1, marginBottom:12 }}>CHECK · 检查点时间线</div>
+          {(inv.checkpoints || []).length === 0 && <div style={{ fontSize:12, color:T.dim, textAlign:"center", padding:"8px 0" }}>还没有检查点</div>}
+          {(inv.checkpoints || []).map((cp, i) => (
+            <div key={cp.id} style={{ display:"flex", gap:12, paddingBottom: i < inv.checkpoints.length - 1 ? 16 : 0 }}>
+              <div style={{ display:"flex", flexDirection:"column", alignItems:"center" }}>
+                <div style={{ width:10, height:10, borderRadius:"50%", background:T.gold, marginTop:4, flexShrink:0 }} />
+                {i < inv.checkpoints.length - 1 && <div style={{ width:1, flex:1, background:T.border, marginTop:4 }} />}
+              </div>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:13, fontWeight:600, color:T.text }}>{cp.title}</div>
+                <div style={{ fontSize:10, color:T.dim, marginTop:2 }}>{fmtDate(cp.created_at)}{cp.action_score_snapshot != null && ` · 行动分 ${cp.action_score_snapshot}`}</div>
+                {cp.description && <div style={{ fontSize:12, color:T.muted, marginTop:6, lineHeight:1.6 }}>{cp.description}</div>}
+                {cp.decision && <div style={{ fontSize:12, color:T.gold, marginTop:6 }}>决策：{cp.decision}</div>}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* 操作面板 */}
+        {panel === "checkpoint" && (
+          <div style={{ background:T.s2, border:`1px solid ${T.borderGold}`, borderRadius:14, padding:"16px", marginBottom:14, animation:"fadeUp 0.2s ease both" }}>
+            <div style={{ fontSize:13, fontWeight:600, color:T.text, marginBottom:12 }}>添加检查点</div>
+            <FF label="标题" required><Inp value={cpTitle} onChange={setCpTitle} placeholder="如 季后赛表现复盘" /></FF>
+            <FF label="描述"><textarea value={cpDesc} onChange={e => setCpDesc(e.target.value)} rows={3} placeholder="发生了什么？数据/叙事/价格有何变化？" style={{ width:"100%", padding:"10px 12px", border:`1px solid ${T.border}`, borderRadius:8, background:T.s3, color:T.text, fontSize:13, outline:"none", resize:"vertical", fontFamily:"'Inter','Noto Sans SC',sans-serif" }} /></FF>
+            <FF label="决策"><Inp value={cpDecision} onChange={setCpDecision} placeholder="如 继续持有 / 加仓 / 减仓" /></FF>
+            <button onClick={addCheckpoint} disabled={busy || !cpTitle.trim()} style={{ width:"100%", padding:"12px", borderRadius:10, border:"none", background: busy || !cpTitle.trim() ? T.s3 : `linear-gradient(135deg,${T.gold},${T.goldDark})`, color: busy || !cpTitle.trim() ? T.dim : "#000", fontSize:13, fontWeight:700, cursor:"pointer" }}>{busy ? "保存中..." : "保存检查点"}</button>
+          </div>
+        )}
+        {panel === "score" && (
+          <div style={{ background:T.s2, border:`1px solid ${T.borderGold}`, borderRadius:14, padding:"16px", marginBottom:14, animation:"fadeUp 0.2s ease both" }}>
+            <div style={{ fontSize:13, fontWeight:600, color:T.text, marginBottom:16 }}>更新 Q / T 分数</div>
+            <ScoreSlider label="Q 资产质量" value={sq} onChange={setSq} color={T.blue} />
+            <ScoreSlider label="T 入场时机" value={st} onChange={setSt} color={T.gold} />
+            <div style={{ textAlign:"center", margin:"4px 0 16px" }}>
+              <span style={{ fontFamily:"'Space Mono',monospace", fontSize:11, color:T.dim }}>新行动分 = </span>
+              <span style={{ fontFamily:"'Space Mono',monospace", fontSize:20, fontWeight:700, color:actionColor(saction) }}>{saction}</span>
+            </div>
+            <button onClick={updateScore} disabled={busy} style={{ width:"100%", padding:"12px", borderRadius:10, border:"none", background: busy ? T.s3 : `linear-gradient(135deg,${T.gold},${T.goldDark})`, color: busy ? T.dim : "#000", fontSize:13, fontWeight:700, cursor:"pointer" }}>{busy ? "更新中..." : "保存分数"}</button>
+          </div>
+        )}
+
+        {/* 底部操作 */}
+        <div style={{ display:"flex", gap:10, marginTop:4 }}>
+          <button onClick={() => setPanel(panel === "checkpoint" ? null : "checkpoint")} style={{ flex:1, padding:"12px", borderRadius:12, border:`1px solid ${T.border}`, background: panel === "checkpoint" ? "rgba(200,168,75,0.08)" : T.s2, color: panel === "checkpoint" ? T.gold : T.muted, fontSize:12, fontWeight:600, cursor:"pointer" }}>📍 检查点</button>
+          <button onClick={() => setPanel(panel === "score" ? null : "score")} style={{ flex:1, padding:"12px", borderRadius:12, border:`1px solid ${T.border}`, background: panel === "score" ? "rgba(200,168,75,0.08)" : T.s2, color: panel === "score" ? T.gold : T.muted, fontSize:12, fontWeight:600, cursor:"pointer" }}>🎚 更新分</button>
+          <button onClick={closeInv} disabled={busy} style={{ flex:1, padding:"12px", borderRadius:12, border:`1px solid rgba(255,69,58,0.2)`, background:"rgba(255,69,58,0.06)", color:T.red, fontSize:12, fontWeight:600, cursor:"pointer" }}>关闭</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TabBar() {
   const {screen,nav}=useApp();
   return <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,display:"flex",justifyContent:"space-around",padding:"10px 0 max(18px, env(safe-area-inset-bottom))",background:"rgba(0,0,0,0.92)",backdropFilter:"blur(30px) saturate(180%)",borderTop:"1px solid rgba(255,255,255,0.08)",zIndex:100}}>
-    {[{id:"home",l:"首页",i:"⬜"},{id:"search",l:"搜索",i:"🔍"},{id:"add"},{id:"pc",l:"PC",i:"❤️"},{id:"stats",l:"统计",i:"📊"}].map(tab=>{
+    {[{id:"home",l:"首页",i:"⬜"},{id:"search",l:"搜索",i:"🔍"},{id:"add"},{id:"pc",l:"PC",i:"❤️"},{id:"invest",l:"投资",i:"📈"},{id:"stats",l:"统计",i:"📊"}].map(tab=>{
       if(tab.id==="add") return <button key="add" onClick={()=>nav("add")} style={{position:"relative",background:"none",border:"none",padding:0,marginTop:-18}}>
         <div style={{width:56,height:56,borderRadius:"50%",background:T.gold,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,boxShadow:`0 4px 24px rgba(200,168,75,0.5)`}}>📷</div>
       </button>;
@@ -1693,6 +2168,7 @@ function Router() {
     case "edit":   return <EditScreen />;
     case "pc":     return <PCScreen />;
     case "stats":  return <StatsScreen />;
+    case "invest": return <InvestmentScreen />;
     case "detail": return <DetailScreen />;
     case "radar":  return <RadarScreen />;
     default:       return <HomeScreen />;
