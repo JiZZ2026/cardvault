@@ -584,6 +584,8 @@ function AddScreen() {
   const [err,setErr]=useState(null); const [form,setForm]=useState(EMPTY());
   const [saving,setSaving]=useState(false); const [tab,setTab]=useState("card");
   const [verifyResult,setVerifyResult]=useState(null);
+  const [contCount,setContCount]=useState(0);
+  const [inherited,setInherited]=useState({});
   const set=k=>v=>setForm(f=>({...f,[k]:v}));
 
   const recognize=async()=>{
@@ -608,7 +610,7 @@ function AddScreen() {
     const tags=buildTags(form);
     const [tf,tb]=await Promise.all([front?mkThumb(front):null,back?mkThumb(back):null]);
     const status=form.sell_price?"sold":form.status;
-    await addCard({...form,buy_price:form.buy_price?parseFloat(form.buy_price):null,sell_price:form.sell_price?parseFloat(form.sell_price):null,is_one_of_one:!!form.is_one_of_one,is_rc:!!form.is_rc,numbered:form.numbered||null,sub_series:form.sub_series||null,grade_company:form.grade_company||null,grade_score:form.grade_score||null,pc_player:form.category==="PC"?form.player:null,front_image:tf,back_image:tb,tags,notes:form.notes||"",status});
+    const result=await addCard({...form,buy_price:form.buy_price?parseFloat(form.buy_price):null,sell_price:form.sell_price?parseFloat(form.sell_price):null,is_one_of_one:!!form.is_one_of_one,is_rc:!!form.is_rc,numbered:form.numbered||null,sub_series:form.sub_series||null,grade_company:form.grade_company||null,grade_score:form.grade_score||null,pc_player:form.category==="PC"?form.player:null,front_image:tf,back_image:tb,tags,notes:form.notes||"",status});
     if(rec){
       const diffFields=["player","series","parallel","numbered","year"];
       const orig={player:rec.player||"",series:rec.series||"",parallel:rec.parallel||"",numbered:rec.numbered||"",year:rec.year||""};
@@ -616,7 +618,15 @@ function AddScreen() {
       const hasDiff=diffFields.some(f=>orig[f]!==corr[f]);
       if(hasDiff){try{await fetch("/api/recognition-corrections",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({original:orig,corrected:corr})})}catch(e){console.error("纠错记录失败:",e)}}
     }
-    setSaving(false); nav("home");
+    setSaving(false);
+    if(result){
+      const next={};
+      if(form.series)next.series=form.series;
+      if(form.year)next.year=form.year;
+      setInherited(next);setContCount(c=>c+1);
+      setFront(null);setBack(null);setRec(null);setVerifyResult(null);setAnim([]);setErr(null);
+      setForm({...EMPTY(),...next});setTab("card");setStep("photo");
+    }
   };
 
   if(step==="photo") return <div style={{paddingBottom:90}}>
@@ -625,6 +635,10 @@ function AddScreen() {
       <span style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.dim,letterSpacing:1}}>录入新卡</span>
       <button onClick={()=>setStep("confirm")} style={{background:"none",border:"none",color:T.dim,fontSize:11}}>跳过</button>
     </div>
+    {contCount>0&&<div style={{padding:"10px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",background:"rgba(48,209,88,0.06)",borderBottom:`1px solid rgba(48,209,88,0.12)`}}>
+      <span style={{fontSize:13,color:T.green,fontWeight:600}}>✓ 已录入 {contCount} 张</span>
+      <button onClick={()=>nav("home")} style={{padding:"5px 14px",borderRadius:8,border:`1px solid ${T.border}`,background:"transparent",color:T.muted,fontSize:12,cursor:"pointer"}}>完成录入</button>
+    </div>}
     <div style={{padding:"24px 20px"}}>
       <StepBar cur={0} />
       <div style={{fontFamily:"'Inter',sans-serif",fontSize:18,color:T.text,marginBottom:6}}>拍摄卡片正反面</div>
@@ -1078,66 +1092,217 @@ function PCScreen() {
 }
 
 function StatsScreen() {
-  const {cards,pcP,stats,dc,rate}=useApp();
+  const {cards,pcP,stats,dc,rate,nav}=useApp();
   const soldCards=cards.filter(c=>c.status==="sold"&&c.sell_price);
   const pnl=soldCards.reduce((s,c)=>s+(parseFloat(c.sell_price)||0)-(parseFloat(c.buy_price)||0),0);
-  const holdCost=cards.filter(c=>c.status!=="sold").reduce((s,c)=>s+(parseFloat(c.buy_price)||0),0);
+  const holdCards=cards.filter(c=>c.status!=="sold");
+  const holdCost=holdCards.reduce((s,c)=>s+(parseFloat(c.buy_price)||0),0);
+  const totalValue=cards.reduce((s,c)=>s+(parseFloat(c.buy_price)||0),0);
+
+  const playerGroups=holdCards.reduce((m,c)=>{const p=c.player||"Unknown";m[p]=(m[p]||0)+(parseFloat(c.buy_price)||0);return m;},{});
+  const playerSlices=Object.entries(playerGroups).sort((a,b)=>b[1]-a[1]);
+  const topPlayers=playerSlices.slice(0,6);
+  const othersVal=playerSlices.slice(6).reduce((s,[,v])=>s+v,0);
+  if(othersVal>0)topPlayers.push(["其他",othersVal]);
+  const pieTotal=topPlayers.reduce((s,[,v])=>s+v,0);
+  const pieColors=[T.gold,"#0A84FF","#30D158","#FF9F0A","#9B6DFF","#FF453A","#48484A"];
+  let pieAngle=0;
+  const pieSegments=topPlayers.map(([name,val],i)=>{const pct=pieTotal>0?val/pieTotal:0;const start=pieAngle;pieAngle+=pct*360;return{name,val,pct,start,end:pieAngle,color:pieColors[i%pieColors.length]};});
+  const pieGrad=pieSegments.map(s=>`${s.color} ${s.start}deg ${s.end}deg`).join(",");
+
+  const seriesGroups=holdCards.reduce((m,c)=>{const k=`${c.year||"?"} ${c.series||"Unknown"}`;m[k]=(m[k]||0)+1;return m;},{});
+  const seriesBars=Object.entries(seriesGroups).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const barMax=seriesBars.length>0?Math.max(...seriesBars.map(([,v])=>v)):1;
+
+  const top5=cards.filter(c=>c.buy_price).sort((a,b)=>(parseFloat(b.buy_price)||0)-(parseFloat(a.buy_price)||0)).slice(0,5);
+
+  const now=new Date();const weekAgo=new Date(now.getTime()-7*24*60*60*1000);
+  const recent7=cards.filter(c=>c.created_at&&new Date(c.created_at)>=weekAgo).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+
+  const catData=[
+    {key:"PC",label:"PC",color:T.gold,count:holdCards.filter(c=>c.category==="PC").length,val:holdCards.filter(c=>c.category==="PC").reduce((s,c)=>s+(parseFloat(c.buy_price)||0),0)},
+    {key:"investment",label:"投资",color:T.blue,count:holdCards.filter(c=>c.category==="investment").length,val:holdCards.filter(c=>c.category==="investment").reduce((s,c)=>s+(parseFloat(c.buy_price)||0),0)},
+    {key:"longhold",label:"长持",color:"#9B6DFF",count:holdCards.filter(c=>c.category==="longhold").length,val:holdCards.filter(c=>c.category==="longhold").reduce((s,c)=>s+(parseFloat(c.buy_price)||0),0)},
+    {key:"other",label:"其他",color:T.muted,count:holdCards.filter(c=>c.category==="other"||!c.category).length,val:holdCards.filter(c=>c.category==="other"||!c.category).reduce((s,c)=>s+(parseFloat(c.buy_price)||0),0)},
+  ];
+  const catTotal=catData.reduce((s,c)=>s+c.val,0);
+
+  const SM={fontFamily:"'Space Mono',monospace"};
+  const secHead=(text)=>({...SM,fontSize:10,color:T.dim,letterSpacing:1,marginBottom:10});
+
   return <div style={{paddingBottom:90}}>
     <div style={{padding:"24px 20px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-      <div><h2 style={{fontFamily:"'Space Mono',monospace",fontSize:18,fontWeight:700,color:T.gold}}>DASHBOARD</h2><p style={{fontSize:11,color:T.dim,marginTop:2}}>收藏总览</p></div>
+      <div><h2 style={{...SM,fontSize:18,fontWeight:700,color:T.gold}}>DASHBOARD</h2><p style={{fontSize:11,color:T.dim,marginTop:2}}>Portfolio Overview</p></div>
       <CurrBtn />
     </div>
     <div style={{padding:"0 20px"}}>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
-        <div style={{padding:"16px",borderRadius:14,background:`linear-gradient(135deg,rgba(201,168,76,0.08),rgba(201,168,76,0.03))`,border:`1px solid ${T.borderGold}`}}>
-          <div style={{fontFamily:"'Space Mono',monospace",fontSize:9,color:T.dim,letterSpacing:1,marginBottom:6}}>持仓成本</div>
-          <div style={{fontFamily:"'Space Mono',monospace",fontSize:20,fontWeight:700,color:T.gold}}>{fmtP(holdCost,dc,rate)}</div>
-          <div style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,marginTop:3}}>≈ {dc==="RMB"?fmtDual(holdCost,rate).usd:fmtDual(holdCost,rate).rmb}</div>
-        </div>
-        <div style={{padding:"16px",borderRadius:14,background:`linear-gradient(135deg,${pnl>=0?"rgba(61,170,106,0.08)":"rgba(212,80,80,0.06)"},transparent)`,border:`1px solid ${pnl>=0?"rgba(61,170,106,0.2)":"rgba(212,80,80,0.2)"}`}}>
-          <div style={{fontFamily:"'Space Mono',monospace",fontSize:9,color:T.dim,letterSpacing:1,marginBottom:6}}>已实现盈亏</div>
-          <div style={{fontFamily:"'Space Mono',monospace",fontSize:20,fontWeight:700,color:pnl>=0?T.green:T.red}}>{pnl>=0?"+":""}{fmtP(Math.abs(pnl),dc,rate)}</div>
-          <div style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,marginTop:3}}>{soldCards.length} 张已出</div>
+
+      {/* 总收藏价值 Hero */}
+      <div style={{padding:"20px",borderRadius:16,background:`linear-gradient(135deg,rgba(200,168,75,0.12),rgba(200,168,75,0.03))`,border:`1px solid ${T.borderGold}`,marginBottom:16,textAlign:"center"}}>
+        <div style={{...SM,fontSize:9,color:T.dim,letterSpacing:2,marginBottom:8}}>TOTAL PORTFOLIO VALUE</div>
+        <div style={{...SM,fontSize:32,fontWeight:700,color:T.gold,lineHeight:1}}>{fmtP(totalValue,dc,rate)}</div>
+        <div style={{...SM,fontSize:11,color:T.dim,marginTop:6}}>≈ {dc==="RMB"?fmtDual(totalValue,rate).usd:fmtDual(totalValue,rate).rmb}</div>
+        <div style={{display:"flex",justifyContent:"center",gap:16,marginTop:12}}>
+          <div><div style={{...SM,fontSize:9,color:T.dim,letterSpacing:1}}>持仓</div><div style={{...SM,fontSize:14,fontWeight:700,color:T.gold,marginTop:2}}>{fmtP(holdCost,dc,rate)}</div></div>
+          <div style={{width:1,background:T.border}} />
+          <div><div style={{...SM,fontSize:9,color:T.dim,letterSpacing:1}}>盈亏</div><div style={{...SM,fontSize:14,fontWeight:700,color:pnl>=0?T.green:T.red,marginTop:2}}>{pnl>=0?"+":""}{fmtP(Math.abs(pnl),dc,rate)}</div></div>
         </div>
       </div>
+
+      {/* Quick Stats */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:16}}>
         {[{icon:"🃏",v:stats.total,l:"总卡"},{icon:"❤️",v:stats.pc,l:"PC"},{icon:"📦",v:stats.grading,l:"送评"},{icon:"✨",v:stats.oneOfOnes,l:"1/1"}].map((s,i)=>(
           <div key={i} style={{padding:"12px 8px",borderRadius:12,textAlign:"center",background:T.s2,border:`1px solid ${T.border}`}}>
             <div style={{fontSize:16,marginBottom:4}}>{s.icon}</div>
-            <div style={{fontFamily:"'Space Mono',monospace",fontSize:16,fontWeight:700,color:T.text}}>{s.v}</div>
+            <div style={{...SM,fontSize:16,fontWeight:700,color:T.text}}>{s.v}</div>
             <div style={{fontSize:10,color:T.dim,marginTop:1}}>{s.l}</div>
           </div>
         ))}
       </div>
+
+      {/* 仓位占比 */}
+      <div style={{background:T.s2,border:`1px solid ${T.border}`,borderRadius:14,padding:"14px 16px",marginBottom:16}}>
+        <div style={secHead()}>CATEGORY ALLOCATION</div>
+        <div style={{display:"flex",gap:12,alignItems:"center"}}>
+          <div style={{flex:1}}>
+            {catData.filter(c=>c.count>0).map(c=>{
+              const pct=catTotal>0?(c.val/catTotal*100):0;
+              return <div key={c.key} style={{marginBottom:10}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <div style={{width:8,height:8,borderRadius:"50%",background:c.color}} />
+                    <span style={{fontSize:12,color:T.text}}>{c.label}</span>
+                    <span style={{...SM,fontSize:10,color:T.dim}}>{c.count}张</span>
+                  </div>
+                  <span style={{...SM,fontSize:11,color:c.color,fontWeight:700}}>{pct.toFixed(0)}%</span>
+                </div>
+                <div style={{height:4,borderRadius:2,background:T.s3}}>
+                  <div style={{height:"100%",borderRadius:2,width:`${pct}%`,background:c.color,transition:"width 0.6s ease"}} />
+                </div>
+              </div>;
+            })}
+          </div>
+          <div style={{textAlign:"right",minWidth:80}}>
+            {catData.filter(c=>c.val>0).map(c=>(
+              <div key={c.key} style={{...SM,fontSize:10,color:T.muted,marginBottom:6}}>{fmtP(c.val,dc,rate)}</div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* 球员持仓分布饼图 */}
+      {pieTotal>0&&<div style={{background:T.s2,border:`1px solid ${T.border}`,borderRadius:14,padding:"14px 16px",marginBottom:16}}>
+        <div style={secHead()}>PLAYER ALLOCATION</div>
+        <div style={{display:"flex",gap:16,alignItems:"center"}}>
+          <div style={{width:120,height:120,borderRadius:"50%",background:`conic-gradient(${pieGrad})`,flexShrink:0,position:"relative"}}>
+            <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",width:56,height:56,borderRadius:"50%",background:T.s2,display:"flex",alignItems:"center",justifyContent:"center"}}>
+              <span style={{...SM,fontSize:10,color:T.dim}}>{topPlayers.length}人</span>
+            </div>
+          </div>
+          <div style={{flex:1,minWidth:0}}>
+            {pieSegments.map((s,i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+                <div style={{display:"flex",alignItems:"center",gap:5,minWidth:0}}>
+                  <div style={{width:8,height:8,borderRadius:2,background:s.color,flexShrink:0}} />
+                  <span style={{fontSize:11,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.name}</span>
+                </div>
+                <span style={{...SM,fontSize:10,color:T.muted,flexShrink:0,marginLeft:6}}>{(s.pct*100).toFixed(0)}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>}
+
+      {/* 系列/年份分布柱状图 */}
+      {seriesBars.length>0&&<div style={{background:T.s2,border:`1px solid ${T.border}`,borderRadius:14,padding:"14px 16px",marginBottom:16}}>
+        <div style={secHead()}>SERIES DISTRIBUTION</div>
+        {seriesBars.map(([label,count],i)=>(
+          <div key={i} style={{marginBottom:8}}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+              <span style={{fontSize:11,color:T.muted,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"70%"}}>{label}</span>
+              <span style={{...SM,fontSize:11,color:T.text,fontWeight:700}}>{count}</span>
+            </div>
+            <div style={{height:6,borderRadius:3,background:T.s3}}>
+              <div style={{height:"100%",borderRadius:3,width:`${(count/barMax)*100}%`,background:`linear-gradient(90deg,${T.gold},${T.goldLight})`,transition:"width 0.6s ease"}} />
+            </div>
+          </div>
+        ))}
+      </div>}
+
+      {/* TOP 5 最贵卡 */}
+      {top5.length>0&&<div style={{background:T.s2,border:`1px solid ${T.border}`,borderRadius:14,padding:"4px 16px",marginBottom:16}}>
+        <div style={{...SM,fontSize:10,color:T.dim,padding:"12px 0 4px",letterSpacing:1}}>TOP 5 MOST VALUABLE</div>
+        {top5.map((c,i)=>(
+          <div key={c.id} onClick={()=>nav("detail",c)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderTop:`1px solid ${T.border}`,cursor:"pointer"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <div style={{...SM,fontSize:14,fontWeight:700,color:i===0?T.gold:i<3?T.goldLight:T.dim,width:20,textAlign:"center"}}>{i+1}</div>
+              <div>
+                <div style={{fontSize:13,color:T.text}}>{c.player}</div>
+                <div style={{fontSize:10,color:T.muted}}>{[c.year,c.series,c.parallel].filter(Boolean).join(" · ")}</div>
+              </div>
+            </div>
+            <div style={{textAlign:"right"}}>
+              <div style={{...SM,fontSize:13,fontWeight:700,color:T.gold}}>{fmtP(c.buy_price,dc,rate,c.price_currency||"RMB")}</div>
+              {c.numbered&&<div style={{...SM,fontSize:9,color:T.dim}}>/{c.numbered}</div>}
+            </div>
+          </div>
+        ))}
+      </div>}
+
+      {/* 最近7天新增 */}
       <div style={{background:T.s2,border:`1px solid ${T.border}`,borderRadius:14,padding:"4px 16px",marginBottom:16}}>
-        <div style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,padding:"12px 0 4px",letterSpacing:1}}>STATUS BREAKDOWN</div>
+        <div style={{...SM,fontSize:10,color:T.dim,padding:"12px 0 4px",letterSpacing:1}}>RECENT 7 DAYS · {recent7.length} 张新增</div>
+        {recent7.length===0&&<div style={{padding:"16px 0",textAlign:"center",color:T.dim,fontSize:12}}>最近7天没有新卡入库</div>}
+        {recent7.slice(0,8).map(c=>{
+          const d=new Date(c.created_at);const ds=`${d.getMonth()+1}/${d.getDate()}`;
+          return <div key={c.id} onClick={()=>nav("detail",c)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderTop:`1px solid ${T.border}`,cursor:"pointer"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span style={{...SM,fontSize:10,color:T.dim,width:32}}>{ds}</span>
+              <div>
+                <div style={{fontSize:13,color:T.text}}>{c.player}</div>
+                <div style={{fontSize:10,color:T.muted}}>{c.series}{c.parallel?` · ${c.parallel}`:""}</div>
+              </div>
+            </div>
+            {c.buy_price&&<span style={{...SM,fontSize:11,color:T.gold}}>{fmtP(c.buy_price,dc,rate,c.price_currency||"RMB")}</span>}
+          </div>;
+        })}
+        {recent7.length>8&&<div style={{padding:"8px 0",textAlign:"center",fontSize:11,color:T.dim}}>还有 {recent7.length-8} 张...</div>}
+      </div>
+
+      {/* STATUS BREAKDOWN */}
+      <div style={{background:T.s2,border:`1px solid ${T.border}`,borderRadius:14,padding:"4px 16px",marginBottom:16}}>
+        <div style={{...SM,fontSize:10,color:T.dim,padding:"12px 0 4px",letterSpacing:1}}>STATUS BREAKDOWN</div>
         {Object.entries(STATUS).map(([k,v])=>{
           const cs=cards.filter(c=>c.status===k);
           const val=cs.reduce((s,c)=>s+(parseFloat(c.buy_price)||0),0);
           return <div key={k} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderTop:`1px solid ${T.border}`}}>
-            <div style={{display:"flex",alignItems:"center",gap:8}}><Chip label={v.label} color={v.color} bg={v.bg} /><span style={{fontFamily:"'Space Mono',monospace",fontSize:13,color:T.text,fontWeight:700}}>{cs.length}</span></div>
-            {val>0&&<span style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.muted}}>{fmtP(val,dc,rate)}</span>}
+            <div style={{display:"flex",alignItems:"center",gap:8}}><Chip label={v.label} color={v.color} bg={v.bg} /><span style={{...SM,fontSize:13,color:T.text,fontWeight:700}}>{cs.length}</span></div>
+            {val>0&&<span style={{...SM,fontSize:11,color:T.muted}}>{fmtP(val,dc,rate)}</span>}
           </div>;
         })}
       </div>
+
+      {/* INVESTMENT P&L */}
       {soldCards.length>0&&<div style={{background:T.s2,border:`1px solid ${T.border}`,borderRadius:14,padding:"4px 16px",marginBottom:16}}>
-        <div style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,padding:"12px 0 4px",letterSpacing:1}}>INVESTMENT P&L</div>
+        <div style={{...SM,fontSize:10,color:T.dim,padding:"12px 0 4px",letterSpacing:1}}>INVESTMENT P&L</div>
         {soldCards.slice(0,5).map(c=>{
           const p=(parseFloat(c.sell_price)||0)-(parseFloat(c.buy_price)||0);
           return <div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderTop:`1px solid ${T.border}`}}>
             <div><div style={{fontSize:13,color:T.text}}>{c.player}</div><div style={{fontSize:10,color:T.muted}}>{c.parallel||c.series}</div></div>
-            <span style={{fontFamily:"'Space Mono',monospace",fontSize:12,color:p>=0?T.green:T.red,fontWeight:700}}>{p>=0?"+":""}{fmtP(Math.abs(p),dc,rate,c.price_currency||"RMB")}</span>
+            <span style={{...SM,fontSize:12,color:p>=0?T.green:T.red,fontWeight:700}}>{p>=0?"+":""}{fmtP(Math.abs(p),dc,rate,c.price_currency||"RMB")}</span>
           </div>;
         })}
       </div>}
+
+      {/* PC BREAKDOWN */}
       <div style={{background:T.s2,border:`1px solid ${T.border}`,borderRadius:14,padding:"12px 16px"}}>
-        <div style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,marginBottom:14,letterSpacing:1}}>PC BREAKDOWN</div>
+        <div style={{...SM,fontSize:10,color:T.dim,marginBottom:14,letterSpacing:1}}>PC BREAKDOWN</div>
         {pcP.map(player=>{
           const cs=cards.filter(c=>c.player===player.name);
           const pct=stats.total>0?(cs.length/stats.total)*100:0;
           const val=cs.reduce((s,c)=>s+(parseFloat(c.buy_price)||0),0);
           return <div key={player.id} style={{marginBottom:14}}>
-            <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}><span style={{fontSize:12,color:T.muted}}>{player.emoji} {player.short}</span><span style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.gold}}>{cs.length}张 · {fmtP(val,dc,rate)}</span></div>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}><span style={{fontSize:12,color:T.muted}}>{player.emoji} {player.short}</span><span style={{...SM,fontSize:11,color:T.gold}}>{cs.length}张 · {fmtP(val,dc,rate)}</span></div>
             <div style={{height:3,borderRadius:2,background:T.s3}}><div style={{height:"100%",borderRadius:2,width:`${pct}%`,background:`linear-gradient(90deg,${player.color1},${T.gold})`,transition:"width 0.6s ease"}} /></div>
           </div>;
         })}
