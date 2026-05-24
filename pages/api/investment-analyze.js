@@ -185,14 +185,40 @@ ${benchmarkContext}
       messages: [{ role: "user", content: prompt }],
     });
 
-    const textBlock = message.content.find(b => b.type === "text");
-    if (!textBlock) return res.status(500).json({ error: "AI 未返回分析结果" });
+    // web_search 返回包含多种 block：web_search_tool_use、web_search_tool_result、text
+    // JSON 通常在最后一个 text block 中，需要拼接所有 text block
+    const textBlocks = (message.content || []).filter(b => b.type === "text");
+    if (textBlocks.length === 0) {
+      console.error("AI 未返回 text block，content types:", (message.content || []).map(b => b.type));
+      return res.status(500).json({ error: "AI 未返回分析结果" });
+    }
 
-    const raw = textBlock.text.trim();
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return res.status(500).json({ error: "AI 返回格式异常" });
+    // 拼接所有 text block 的内容
+    const allText = textBlocks.map(b => b.text).join("\n");
+    console.log("AI raw text length:", allText.length, "blocks:", textBlocks.length);
 
-    const result = JSON.parse(jsonMatch[0]);
+    // 从拼接后的文本中提取最外层的 JSON 对象
+    // 贪婪匹配可能匹配到嵌套 JSON 内部，所以从后往前找最后一个完整 JSON
+    let result = null;
+    const jsonCandidates = allText.match(/\{[\s\S]*\}/g);
+    if (jsonCandidates) {
+      // 从最长的候选开始尝试解析（最外层 JSON 通常最长）
+      const sorted = [...jsonCandidates].sort((a, b) => b.length - a.length);
+      for (const candidate of sorted) {
+        try {
+          const parsed = JSON.parse(candidate);
+          if (parsed.q_score !== undefined && parsed.t_score !== undefined) {
+            result = parsed;
+            break;
+          }
+        } catch {}
+      }
+    }
+
+    if (!result) {
+      console.error("AI 返回格式异常，无法提取 JSON。原始文本前500字符:", allText.slice(0, 500));
+      return res.status(500).json({ error: "AI 返回格式异常" });
+    }
 
     const q = Math.max(0, Math.min(100, Math.round(Number(result.q_score))));
     const t = Math.max(0, Math.min(100, Math.round(Number(result.t_score))));
