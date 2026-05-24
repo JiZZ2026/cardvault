@@ -3,6 +3,15 @@ import { supabase } from '../../lib/supabase';
 import Anthropic from '@anthropic-ai/sdk';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+const KNOWN_SUBSETS = {
+  'prizm': ['Base Set', 'Choice', 'Fast Break'],
+  'select': ['Base Set', 'Premier Level', 'Select'],
+  'mosaic': ['Base Set', 'Choice', 'Fast Break'],
+  'optic': ['Base Set', 'Choice', 'Fast Break'],
+};
+
+export const config = { maxDuration: 60 };
+
 export default async function handler(req, res) {
   if (req.method === 'GET') {
     const { id, search } = req.query;
@@ -22,18 +31,43 @@ export default async function handler(req, res) {
     const { set_name, set_year, brand, subset, checklist_type, use_ai } = req.body;
     if (!set_name || !checklist_type) return res.status(400).json({ error: '缺少 set_name 或 checklist_type' });
     let items = req.body.items || [];
+    const isFullParallels = checklist_type === 'full_parallels';
     if (use_ai) {
-      try { items = await generateWithAI(set_name, set_year, brand, subset, checklist_type); }
-      catch (e) { return res.status(500).json({ error: 'AI生成失败: ' + e.message }); }
+      try {
+        if (isFullParallels) {
+          items = await generateFullParallels(set_name, set_year, brand);
+        } else {
+          items = await generateWithAI(set_name, set_year, brand, subset, checklist_type);
+        }
+      } catch (e) { return res.status(500).json({ error: 'AI生成失败: ' + e.message }); }
     }
     const { data, error } = await supabase.from('checklists')
-      .insert([{ set_name, set_year, brand, subset: subset || 'Base', checklist_type, items }])
+      .insert([{ set_name, set_year, brand, subset: isFullParallels ? 'Full' : (subset || 'Base'), checklist_type: isFullParallels ? 'parallels' : checklist_type, items }])
       .select().single();
     if (error) return res.status(500).json({ error: error.message });
     return res.status(201).json(data);
   }
 
   return res.status(405).json({ error: 'Method not allowed' });
+}
+
+function detectSubsets(set_name) {
+  const lower = set_name.toLowerCase();
+  for (const [key, subsets] of Object.entries(KNOWN_SUBSETS)) {
+    if (lower.includes(key)) return subsets;
+  }
+  return null;
+}
+
+async function generateFullParallels(set_name, set_year, brand) {
+  const subsets = detectSubsets(set_name) || ['Base Set'];
+  const results = await Promise.all(
+    subsets.map(async (sub) => {
+      const items = await generateWithAI(set_name, set_year, brand, sub, 'parallels');
+      return items.map(item => ({ ...item, subset: sub }));
+    })
+  );
+  return results.flat();
 }
 
 async function generateWithAI(set_name, set_year, brand, subset, checklist_type) {

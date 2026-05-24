@@ -1553,7 +1553,7 @@ function NewGoalScreen({ pcP, onDone, onBack }) {
   const generateChecklist = async () => {
     if (!clSearch) return;
     setGenerating(true); setErr("");
-    const r = await apiGenerateChecklist({ set_name:clSearch, checklist_type: mode === "full_players" ? "player_set" : "parallels", use_ai:true });
+    const r = await apiGenerateChecklist({ set_name:clSearch, checklist_type: mode === "full_players" ? "player_set" : mode === "full_parallels" ? "full_parallels" : "parallels", use_ai:true });
     if (r.success) { setSelectedCL(r.data); setChecklists(prev => [r.data, ...prev.filter(c => c.id !== r.data.id)]); }
     else setErr(r.error || "AI生成失败");
     setGenerating(false);
