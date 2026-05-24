@@ -811,9 +811,46 @@ function DailyCardFull({ card, players }) {
 
 function HomeScreen() {
   const {cards,pcP,stats,loading,daily,nav,refreshDaily,dc,toggleDC,rate}=useApp();
-  if(loading) return <div style={{padding:"20px"}}><Skel height={24} width={140} style={{marginBottom:6}} /><Skel height={12} width={100} style={{marginBottom:28}} /><Skel height={320} radius={20} style={{marginBottom:20}} /><Skel height={100} radius={16} style={{marginBottom:16}} /><Skel height={160} radius={14} /></div>;
+  const [investments, setInvestments] = useState([]);
+  const [invLoading, setInvLoading] = useState(true);
+  const [showAllCards, setShowAllCards] = useState(false);
+  const [q, setQ] = useState("");
+  const [cf, setCf] = useState("all");
+
+  useEffect(() => {
+    apiGetInvestments().then(d => { setInvestments(Array.isArray(d) ? d : []); setInvLoading(false); }).catch(() => setInvLoading(false));
+  }, []);
+
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthNew = cards.filter(c => c.created_at && new Date(c.created_at) >= monthStart).length;
+
+  const signalInvestments = investments.filter(i => {
+    const s = i.action_score;
+    if (s == null) return false;
+    return s >= 60 || s < 40;
+  });
+
+  const pcCards = pcP.map(p => ({
+    ...p,
+    cards: cards.filter(c => c.player === p.name && c.category === "PC"),
+  }));
+
+  const filteredCards = cards.filter(c => {
+    if (cf !== "all" && c.category !== cf) return false;
+    if (q) {
+      const terms = expandQ(q);
+      const fields = [c.player, c.series, c.parallel, c.card_number, c.numbered, c.grade, c.team, c.sub_series, c.year, ...(c.tags || [])].filter(Boolean).map(f => f.toLowerCase());
+      return terms.some(t => fields.some(f => f.includes(t)));
+    }
+    return true;
+  });
+
+  if (loading) return <div style={{padding:"20px"}}><Skel height={120} radius={16} style={{marginBottom:16}} /><Skel height={80} radius={14} style={{marginBottom:16}} /><Skel height={200} radius={14} style={{marginBottom:16}} /><Skel height={160} radius={14} /></div>;
+
   return (
     <div style={{paddingBottom:90}}>
+      {/* Header */}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"20px 20px 12px"}}>
         <div>
           <h1 style={{fontSize:26,fontWeight:700,color:T.text,letterSpacing:"-0.5px",lineHeight:1.1,fontFamily:"'Inter',sans-serif"}}>Card Vault</h1>
@@ -825,44 +862,135 @@ function HomeScreen() {
           <button onClick={()=>nav("add")} style={{width:38,height:38,borderRadius:"50%",border:"none",background:T.gold,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,cursor:"pointer",flexShrink:0}}>📷</button>
         </div>
       </div>
-      {daily&&(<div style={{padding:"0 16px 20px",animation:"fadeUp 0.5s ease both"}}>
+
+      {/* 1. Asset Overview Hero Card */}
+      <div style={{margin:"0 16px 16px",padding:"20px",borderRadius:16,background:"linear-gradient(145deg, rgba(26,24,16,1), rgba(18,16,10,1))",border:"1px solid rgba(200,168,75,0.25)",animation:"fadeUp 0.5s ease both"}}>
+        <div style={{fontFamily:"'Space Mono',monospace",fontSize:9,color:T.dim,letterSpacing:2,marginBottom:10}}>TOTAL PORTFOLIO</div>
+        <div style={{fontFamily:"'Space Mono',monospace",fontSize:36,fontWeight:700,color:T.gold,lineHeight:1}}>{fmtP(stats.cost,dc,rate)}</div>
+        <div style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.dim,marginTop:4}}>≈ {dc==="RMB"?fmtDual(stats.cost,rate).usd:fmtDual(stats.cost,rate).rmb}</div>
+        <div style={{display:"flex",gap:16,marginTop:16}}>
+          <div style={{flex:1,padding:"10px 12px",borderRadius:10,background:"rgba(255,255,255,0.04)"}}>
+            <div style={{fontFamily:"'Space Mono',monospace",fontSize:20,fontWeight:700,color:T.text}}>{stats.total}</div>
+            <div style={{fontSize:10,color:T.dim,marginTop:2}}>总卡片</div>
+          </div>
+          <div style={{flex:1,padding:"10px 12px",borderRadius:10,background:"rgba(255,255,255,0.04)"}}>
+            <div style={{fontFamily:"'Space Mono',monospace",fontSize:20,fontWeight:700,color:T.green}}>+{monthNew}</div>
+            <div style={{fontSize:10,color:T.dim,marginTop:2}}>本月新增</div>
+          </div>
+          <div style={{flex:1,padding:"10px 12px",borderRadius:10,background:"rgba(255,255,255,0.04)"}}>
+            <div style={{fontFamily:"'Space Mono',monospace",fontSize:20,fontWeight:700,color:stats.pnl>=0?T.green:T.red}}>{stats.pnl>=0?"+":""}{fmtP(Math.abs(stats.pnl),dc,rate)}</div>
+            <div style={{fontSize:10,color:T.dim,marginTop:2}}>已实现盈亏</div>
+          </div>
+        </div>
+      </div>
+
+      {/* 2. Investment Signal Alerts */}
+      <div style={{padding:"0 16px 16px",animation:"fadeUp 0.5s ease 80ms both"}}>
+        {!invLoading && investments.length > 0 && signalInvestments.length > 0 ? (
+          <div style={{background:T.s2,border:`1px solid ${T.border}`,borderRadius:14,padding:"14px 16px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <span style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,letterSpacing:1}}>INVESTMENT SIGNALS</span>
+              <button onClick={()=>nav("invest")} style={{background:"none",border:"none",color:T.gold,fontSize:11,cursor:"pointer",padding:0,fontWeight:500}}>查看全部</button>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              {signalInvestments.slice(0,5).map(inv => {
+                const s = inv.action_score;
+                const isGood = s >= 60;
+                const color = s >= 75 ? T.green : s >= 60 ? T.gold : s < 40 ? T.red : T.orange;
+                const icon = s >= 75 ? "🟢" : s >= 60 ? "🟡" : s < 40 ? "🔴" : "🟠";
+                const advice = s >= 75 ? "可建仓" : s >= 60 ? "可吸纳" : s < 40 ? "建议清仓" : "观望";
+                return (
+                  <div key={inv.id} onClick={()=>nav("invest")} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",borderRadius:10,background:`${color}08`,border:`1px solid ${color}22`,cursor:"pointer"}}>
+                    <span style={{fontSize:14}}>{icon}</span>
+                    <span style={{fontSize:13,color:T.text,fontWeight:600,flex:1}}>{inv.player_name_cn || inv.player_name}</span>
+                    <span style={{fontFamily:"'Space Mono',monospace",fontSize:12,fontWeight:700,color}}>{s}</span>
+                    <span style={{fontSize:11,color,fontWeight:500}}>{advice}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : !invLoading && investments.length === 0 ? (
+          <div onClick={()=>nav("invest")} style={{background:T.s2,border:`1px dashed ${T.borderGold}`,borderRadius:14,padding:"16px",cursor:"pointer",textAlign:"center"}}>
+            <span style={{fontSize:13,color:T.muted}}>开始你的第一个投资追踪</span>
+            <span style={{color:T.gold,fontWeight:600,marginLeft:6}}>→</span>
+          </div>
+        ) : null}
+      </div>
+
+      {/* 3. PC Player Progress */}
+      {pcCards.some(p => p.cards.length > 0) && (
+        <div style={{padding:"0 16px 16px",animation:"fadeUp 0.5s ease 120ms both"}}>
+          <SHdr title="PC 球员" sub={`${pcCards.reduce((s,p)=>s+p.cards.length,0)} 张`} action="全部" onAction={()=>nav("pc")} />
+          <div style={{display:"flex",gap:10,overflowX:"auto",scrollbarWidth:"none",paddingBottom:4}}>
+            {pcCards.filter(p => p.cards.length > 0).map(p => (
+              <div key={p.id} onClick={()=>nav("pc")} style={{flexShrink:0,width:130,borderRadius:14,overflow:"hidden",background:`linear-gradient(145deg,${p.color1}44,${p.color2}22)`,border:`1px solid ${T.border}`,cursor:"pointer"}}>
+                <div style={{padding:"14px 12px",textAlign:"center"}}>
+                  <div style={{fontSize:32,marginBottom:6}}>{p.emoji}</div>
+                  <div style={{fontSize:13,fontWeight:600,color:T.text}}>{p.short}</div>
+                  <div style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.gold,marginTop:4}}>{p.cards.length} 张</div>
+                </div>
+                <div style={{display:"flex",gap:4,padding:"0 8px 10px",overflowX:"auto",scrollbarWidth:"none"}}>
+                  {p.cards.slice(0,3).map(c => (
+                    <div key={c.id} style={{width:32,height:44,borderRadius:4,overflow:"hidden",flexShrink:0,background:"#000",border:"1px solid rgba(255,255,255,0.1)"}}>
+                      {c.front_image ? <img src={c.front_image} alt="" style={{width:"100%",height:"100%",objectFit:"contain"}} /> : <div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12}}>{pEmoji(c.player,pcP)}</div>}
+                    </div>
+                  ))}
+                  {p.cards.length > 3 && <div style={{width:32,height:44,borderRadius:4,flexShrink:0,background:"rgba(255,255,255,0.04)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,color:T.dim}}>+{p.cards.length-3}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 4. Recent Cards (latest 5) */}
+      <div style={{padding:"0 16px 16px",animation:"fadeUp 0.5s ease 160ms both"}}>
+        <SHdr title="最近录入" sub="5 张" />
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {cards.slice(0,5).map(c=><CardRow key={c.id} card={c} ps={pcP} onClick={()=>nav("detail",c)} />)}
+          {cards.length===0&&(<div style={{textAlign:"center",padding:"48px 0",color:T.dim}}><div style={{fontSize:48,marginBottom:12}}>🃏</div><div style={{fontSize:14}}>还没有卡片，点右上角📷开始录入</div></div>)}
+        </div>
+      </div>
+
+      {/* 5. Full Card List (collapsible) */}
+      {cards.length > 5 && (
+        <div style={{padding:"0 16px",animation:"fadeUp 0.5s ease 200ms both"}}>
+          <button onClick={()=>setShowAllCards(!showAllCards)} style={{width:"100%",padding:"12px",borderRadius:12,border:`1px solid ${T.border}`,background:showAllCards?"rgba(200,168,75,0.06)":"transparent",color:showAllCards?T.gold:T.muted,fontSize:13,fontWeight:600,cursor:"pointer",marginBottom:showAllCards?14:0,transition:"all 0.2s"}}>
+            {showAllCards ? "收起卡片列表 ↑" : `查看全部 ${cards.length} 张 ↓`}
+          </button>
+          {showAllCards && (
+            <div style={{animation:"fadeUp 0.3s ease both"}}>
+              {/* Filters */}
+              <div style={{display:"flex",gap:8,marginBottom:12,overflowX:"auto",scrollbarWidth:"none"}}>
+                {[["all","全部"],["PC","PC"],["investment","投资"],["longhold","长持"]].map(([v,l])=>(
+                  <button key={v} onClick={()=>setCf(v)} style={{padding:"6px 14px",borderRadius:8,border:`1px solid ${cf===v?T.borderGold:T.border}`,background:cf===v?"rgba(201,168,76,0.1)":"transparent",color:cf===v?T.gold:T.muted,fontSize:12,whiteSpace:"nowrap",cursor:"pointer"}}>{l}</button>
+                ))}
+              </div>
+              <div style={{position:"relative",marginBottom:12}}>
+                <span style={{position:"absolute",left:14,top:"50%",transform:"translateY(-50%)",fontSize:14,color:T.dim,pointerEvents:"none"}}>🔍</span>
+                <input value={q} onChange={e=>setQ(e.target.value)} placeholder="搜索球星、系列..."
+                  style={{width:"100%",padding:"10px 16px 10px 40px",border:`1px solid ${T.border}`,borderRadius:10,background:T.s2,color:T.text,fontSize:13,outline:"none"}}
+                  onFocus={e=>e.target.style.borderColor=T.gold} onBlur={e=>e.target.style.borderColor=T.border} />
+              </div>
+              <div style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,marginBottom:10}}>{filteredCards.length} 张</div>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {filteredCards.map(c=><CardRow key={c.id} card={c} ps={pcP} onClick={()=>nav("detail",c)} />)}
+                {filteredCards.length===0&&<div style={{textAlign:"center",padding:"32px 0",color:T.dim,fontSize:12}}>没有匹配的卡片</div>}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Today's Pick (moved below) */}
+      {daily&&(<div style={{padding:"16px 16px 0",animation:"fadeUp 0.5s ease 240ms both"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,padding:"0 4px"}}>
           <span style={{fontSize:17,fontWeight:600,color:T.text,letterSpacing:"-0.3px"}}>今日精选</span>
           <button onClick={e=>{e.stopPropagation();refreshDaily();}} style={{background:"none",border:"none",color:T.gold,fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",gap:4,fontWeight:500,padding:0}}>🔀 换一张</button>
         </div>
         <DailyCardFull card={daily} players={pcP} />
       </div>)}
-      <div style={{padding:"0 16px 16px",animation:"fadeUp 0.5s ease 80ms both"}}>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
-          {[{icon:"🃏",v:stats.total,l:"总卡数",go:"search"},{icon:"❤️",v:stats.pc,l:"PC",go:"pc"},{icon:"📈",v:stats.inv,l:"投资",go:"search"},{icon:"💎",v:stats.longhold,l:"长持",go:"search"}].map((s,i)=>(
-            <div key={i} onClick={()=>nav(s.go)} style={{padding:"14px 6px",borderRadius:16,textAlign:"center",background:T.s2,cursor:"pointer",transition:"background 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=T.s3} onMouseLeave={e=>e.currentTarget.style.background=T.s2}>
-              <div style={{fontSize:18,marginBottom:6}}>{s.icon}</div>
-              <div style={{fontSize:22,fontWeight:700,color:T.text,letterSpacing:"-0.5px",lineHeight:1}}>{s.v}</div>
-              <div style={{fontSize:10,color:T.muted,marginTop:4}}>{s.l}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-      {(stats.cost!==null&&stats.cost>0)&&(<div style={{margin:"0 16px 16px",padding:"14px 16px",borderRadius:16,background:`linear-gradient(135deg,rgba(200,168,75,0.1),rgba(200,168,75,0.04))`,border:`1px solid rgba(200,168,75,0.2)`,animation:"fadeUp 0.5s ease 120ms both"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <span style={{fontSize:13,color:T.muted}}>持仓总成本</span>
-          <span style={{fontSize:18,fontWeight:700,color:T.gold,fontFamily:"monospace"}}>{fmtP(stats.cost,dc,rate)}</span>
-        </div>
-        <div style={{textAlign:"right",marginTop:2}}><span style={{fontSize:11,color:T.dim}}>≈ {dc==="RMB"?fmtDual(stats.cost,rate).usd:fmtDual(stats.cost,rate).rmb}</span></div>
-      </div>)}
-      <div style={{padding:"0 16px",animation:"fadeUp 0.5s ease 160ms both"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-          <span style={{fontSize:17,fontWeight:600,color:T.text,letterSpacing:"-0.3px"}}>最近入库</span>
-          <div style={{display:"flex",alignItems:"center",gap:6}}>
-            <span style={{fontSize:12,color:T.muted}}>{cards.length} 张</span>
-            <button onClick={()=>nav("search")} style={{background:"none",border:"none",color:T.gold,fontSize:13,cursor:"pointer",padding:0,fontWeight:500}}>全部</button>
-          </div>
-        </div>
-        <div style={{display:"flex",flexDirection:"column",gap:8}}>
-          {cards.slice(0,5).map(c=><CardRow key={c.id} card={c} ps={pcP} onClick={()=>nav("detail",c)} />)}
-          {cards.length===0&&(<div style={{textAlign:"center",padding:"48px 0",color:T.dim}}><div style={{fontSize:48,marginBottom:12}}>🃏</div><div style={{fontSize:14}}>还没有卡片，点右上角📷开始录入</div></div>)}
-        </div>
-      </div>
     </div>
   );
 }
