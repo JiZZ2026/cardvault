@@ -26,18 +26,69 @@ export default async function handler(req, res) {
 
     if (error) return res.status(500).json({ error: error.message });
 
+    // Load active investments for signal tagging
+    let investMap = {};
+    try {
+      const { data: investments } = await supabase
+        .from('player_investments')
+        .select('id, player_name, player_name_cn, exit_rules, action_score, status_signal')
+        .eq('status', 'active');
+      (investments || []).forEach(inv => {
+        const names = [inv.player_name, inv.player_name_cn].filter(Boolean).map(n => n.toLowerCase());
+        names.forEach(n => { investMap[n] = inv; });
+      });
+    } catch (e) { console.error('Investment load for signals:', e.message); }
+
     const grouped = {};
     for (const r of (data || [])) {
       const wid = r.watch_item_id;
       if (!grouped[wid]) grouped[wid] = { watch_item: r.watch_item, results: [] };
-      if (grouped[wid].results.length < 10) grouped[wid].results.push(r);
+      if (grouped[wid].results.length < 10) {
+        // Tag results with investment signals
+        let signal = null;
+        const wi = r.watch_item;
+        const playerName = wi?.goal?.player_name || wi?.description?.replace('INV: ', '') || '';
+        const matchedInv = investMap[playerName.toLowerCase()];
+        if (matchedInv && r.price) {
+          const price = Number(r.price);
+          const exit = matchedInv.exit_rules && !Array.isArray(matchedInv.exit_rules) ? matchedInv.exit_rules : null;
+          if (exit) {
+            if (exit.stop_loss && price > 0) signal = 'normal';
+            if (exit.profit_target && price > 0) signal = 'normal';
+          }
+          if (matchedInv.action_score != null) {
+            if (matchedInv.action_score >= 60) signal = 'buy_opportunity';
+            else if (matchedInv.action_score < 40) signal = 'sell_window';
+          }
+        }
+        grouped[wid].results.push({ ...r, investment_signal: signal, matched_investment: matchedInv ? { action_score: matchedInv.action_score, status_signal: matchedInv.status_signal } : null });
+      }
     }
     const items = Object.values(grouped);
+
+    // Count signals for summary
+    let buyOpportunities = 0, sellWindows = 0;
+    items.forEach(g => g.results.forEach(r => {
+      if (r.investment_signal === 'buy_opportunity') buyOpportunities++;
+      if (r.investment_signal === 'sell_window') sellWindows++;
+    }));
+
+    // Sort: buy opportunities first, then sell windows, then normal
+    const sortKey = (g) => {
+      const hasBuy = g.results.some(r => r.investment_signal === 'buy_opportunity');
+      const hasSell = g.results.some(r => r.investment_signal === 'sell_window');
+      if (hasBuy) return 0;
+      if (hasSell) return 1;
+      return 2;
+    };
+    items.sort((a, b) => sortKey(a) - sortKey(b));
+
     return res.status(200).json({
       mustWatch: items.filter(i => i.watch_item?.tier === 'must_watch'),
       niceToHave: items.filter(i => i.watch_item?.tier === 'nice_to_have'),
       lastScanned: data?.[0]?.scanned_at || null,
       total: data?.length || 0,
+      summary: { buyOpportunities, sellWindows, totalResults: data?.length || 0 },
     });
   }
 
@@ -105,10 +156,11 @@ export default async function handler(req, res) {
 
     if (watchItems.length === 0 && !goal_id) {
       const rebuilt = await rebuildWatchItems();
-      if (rebuilt === 0) {
+      const investRebuilt = await rebuildInvestmentWatchItems();
+      if (rebuilt === 0 && investRebuilt === 0) {
         return res.status(200).json({
           success: false, scanned: 0, found: 0,
-          message: '没有收集目标或缺口为空，请先创建收集目标',
+          message: '没有收集目标或投资追踪，请先创建',
         });
       }
       watchItems = await getActiveWatchItems(null);
@@ -250,6 +302,46 @@ async function rebuildWatchItems() {
       search_keywords_katao: kataoKw,
       tier: 'must_watch',
       status: 'active',
+    }]);
+    if (!error) total++;
+  }
+  return total;
+}
+
+async function rebuildInvestmentWatchItems() {
+  const { data: investments } = await supabase
+    .from('player_investments')
+    .select('*')
+    .eq('status', 'active');
+
+  if (!investments?.length) return 0;
+  let total = 0;
+
+  for (const inv of investments) {
+    const { data: existing } = await supabase.from('watch_items')
+      .select('id').eq('source', 'investment').eq('description', `INV: ${inv.player_name_cn || inv.player_name}`).limit(1);
+    if (existing?.length) continue;
+
+    const playerCn = inv.player_name_cn || '';
+    const playerEn = inv.player_name || '';
+    const meta = inv.player_meta || {};
+    const yearShort = meta.year_short || '';
+    const brand = meta.brand || 'prizm';
+
+    const kataoKw = [playerCn, yearShort, brand.toLowerCase()].filter(Boolean).join(' ').trim();
+    if (!kataoKw) continue;
+
+    const ebayKw = [playerEn.split(' ').pop(), yearShort, brand].filter(Boolean).join(' ');
+
+    const { error } = await supabase.from('watch_items').insert([{
+      source: 'investment',
+      goal_id: null,
+      description: `INV: ${inv.player_name_cn || inv.player_name}`,
+      search_keywords_ebay: ebayKw,
+      search_keywords_katao: kataoKw,
+      tier: 'must_watch',
+      status: 'active',
+      meta: { investment_id: inv.id, player_name: inv.player_name, exit_rules: inv.exit_rules },
     }]);
     if (!error) total++;
   }

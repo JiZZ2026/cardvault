@@ -1485,6 +1485,7 @@ function RadarScreen() {
 
   const totalMissing = goals.reduce((s, g) => s + (g.missing_count || 0), 0);
   const hasResults = scanData && (scanData.mustWatch?.length > 0 || scanData.niceToHave?.length > 0);
+  const summary = scanData?.summary;
 
   if (showNewGoal) return <NewGoalScreen pcP={pcP} onDone={() => { setShowNewGoal(false); loadGoals(); }} onBack={() => setShowNewGoal(false)} />;
 
@@ -1545,6 +1546,22 @@ function RadarScreen() {
                 <div style={{ fontSize:32, marginBottom:12, animation:"pulse 1s ease infinite" }}>🔍</div>
                 <div style={{ fontSize:14, color:T.text, marginBottom:4 }}>正在扫描 eBay</div>
                 <div style={{ fontSize:12, color:T.muted }}>搜索 {totalMissing} 张缺口卡...</div>
+              </div>
+            )}
+            {hasResults && !scanning && summary && (summary.buyOpportunities > 0 || summary.sellWindows > 0) && (
+              <div style={{ display:"flex", gap:8, marginBottom:16 }}>
+                <div style={{ flex:1, padding:"12px", borderRadius:12, background:"rgba(48,209,88,0.06)", border:"1px solid rgba(48,209,88,0.2)", textAlign:"center" }}>
+                  <div style={{ fontFamily:"'Space Mono',monospace", fontSize:20, fontWeight:700, color:T.green }}>{summary.buyOpportunities}</div>
+                  <div style={{ fontSize:10, color:T.muted, marginTop:2 }}>🔥 买入机会</div>
+                </div>
+                <div style={{ flex:1, padding:"12px", borderRadius:12, background:"rgba(255,159,10,0.06)", border:"1px solid rgba(255,159,10,0.2)", textAlign:"center" }}>
+                  <div style={{ fontFamily:"'Space Mono',monospace", fontSize:20, fontWeight:700, color:T.orange }}>{summary.sellWindows}</div>
+                  <div style={{ fontSize:10, color:T.muted, marginTop:2 }}>💰 出货窗口</div>
+                </div>
+                <div style={{ flex:1, padding:"12px", borderRadius:12, background:T.s2, border:`1px solid ${T.border}`, textAlign:"center" }}>
+                  <div style={{ fontFamily:"'Space Mono',monospace", fontSize:20, fontWeight:700, color:T.text }}>{summary.totalResults}</div>
+                  <div style={{ fontSize:10, color:T.muted, marginTop:2 }}>总匹配</div>
+                </div>
               </div>
             )}
             {hasResults && !scanning && <>
@@ -1630,6 +1647,10 @@ function ScanResultGroup({ group, fmtPrice, onDismiss }) {
               )}
               {/* 信息 */}
               <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:3 }}>
+                  {r.investment_signal === 'buy_opportunity' && <span style={{ fontSize:9, fontWeight:700, color:T.green, background:"rgba(48,209,88,0.12)", padding:"2px 6px", borderRadius:4 }}>🔥 买入</span>}
+                  {r.investment_signal === 'sell_window' && <span style={{ fontSize:9, fontWeight:700, color:T.orange, background:"rgba(255,159,10,0.12)", padding:"2px 6px", borderRadius:4 }}>💰 出货</span>}
+                </div>
                 <div style={{ fontSize:12, color:T.text, lineHeight:1.45, marginBottom:5, overflow:"hidden", display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical" }}>{r.title}</div>
                 <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
                   <span style={{ fontSize:13, fontWeight:700, color:T.gold }}>
@@ -1641,6 +1662,7 @@ function ScanResultGroup({ group, fmtPrice, onDismiss }) {
                     <span style={{ fontSize:10, color: r.time_remaining.includes('分') ? T.red : T.muted }}>⏱ {r.time_remaining}</span>}
                   {r.platform === 'katao' &&
                     <span style={{ fontSize:9, fontWeight:700, color:T.blue, background:"rgba(10,132,255,0.1)", padding:"2px 6px", borderRadius:4 }}>卡淘</span>}
+                  {r.matched_investment && <span style={{ fontSize:9, color:T.dim }}>行动分 {r.matched_investment.action_score}</span>}
                 </div>
               </div>
               {/* 查看按钮 */}
