@@ -2052,26 +2052,106 @@ function ScoreSlider({ label, value, onChange, color }) {
 }
 
 function InvestmentScreen() {
-  const { cards } = useApp();
+  const { cards, showToast } = useApp();
   const [view, setView] = useState("list");
   const [detailId, setDetailId] = useState(null);
   const [investments, setInvestments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
 
+  const [recommendations, setRecommendations] = useState(null);
+  const [recLoading, setRecLoading] = useState(false);
+  const [recError, setRecError] = useState("");
+  const [recCachedAt, setRecCachedAt] = useState(null);
+
+  const [batchRefreshing, setBatchRefreshing] = useState(false);
+  const [batchProgress, setBatchProgress] = useState({ current:0, total:0 });
+  const [batchResult, setBatchResult] = useState(null);
+
   const load = async () => { setLoading(true); const d = await apiGetInvestments(); setInvestments(Array.isArray(d) ? d : []); setLoading(false); };
   useEffect(() => { load(); }, []);
 
+  useEffect(() => {
+    const cached = localStorage.getItem("cv_rec");
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        const age = Date.now() - new Date(parsed.generated_at).getTime();
+        if (age < 7 * 24 * 60 * 60 * 1000) {
+          setRecommendations(parsed.recommendations);
+          setRecCachedAt(parsed.generated_at);
+        }
+      } catch {}
+    }
+  }, []);
+
+  const fetchRecommendations = async () => {
+    setRecLoading(true); setRecError("");
+    try {
+      const r = await fetch("/api/investment-recommend", { method:"POST", headers:{"Content-Type":"application/json"}, body:"{}" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "推荐失败");
+      setRecommendations(d.recommendations || []);
+      setRecCachedAt(d.generated_at);
+      localStorage.setItem("cv_rec", JSON.stringify(d));
+    } catch (e) { setRecError(e.message); }
+    setRecLoading(false);
+  };
+
+  const batchRefresh = async () => {
+    const active = investments.filter(i => i.status === "active");
+    if (!active.length) return;
+    setBatchRefreshing(true);
+    setBatchProgress({ current:0, total:active.length });
+    setBatchResult(null);
+    const changes = [];
+    for (let i = 0; i < active.length; i++) {
+      setBatchProgress({ current:i+1, total:active.length });
+      const inv = active[i];
+      try {
+        const r = await fetch("/api/investment-analyze", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ player_name: inv.player_name }) });
+        const d = await r.json();
+        if (r.ok && d.q_score != null && d.t_score != null) {
+          const oldAction = inv.action_score;
+          const newAction = Math.min(d.q_score, d.t_score);
+          const delta = oldAction != null ? newAction - oldAction : null;
+          await fetch(`/api/investments?id=${inv.id}`, { method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ q_score:d.q_score, t_score:d.t_score, q_breakdown:d.q_breakdown, t_breakdown:d.t_breakdown }) });
+          if (delta != null && (Math.abs(delta) > 10 || (oldAction >= 40 && newAction < 40) || (oldAction < 60 && newAction >= 60))) {
+            await fetch(`/api/investments/${inv.id}?action=checkpoint`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ trigger_type:"batch_refresh", title:"批量刷新评分变化", description:`Q ${inv.q_score ?? "—"}→${d.q_score}, T ${inv.t_score ?? "—"}→${d.t_score}, 行动分 ${oldAction ?? "—"}→${newAction}`, q_score_snapshot:d.q_score, t_score_snapshot:d.t_score, action_score_snapshot:newAction }) });
+            changes.push({ name:inv.player_name_cn||inv.player_name, oldAction, newAction, delta });
+          }
+        }
+      } catch (e) { console.error(`Batch refresh ${inv.player_name}:`, e); }
+    }
+    setBatchRefreshing(false);
+    setBatchResult({ total:active.length, changes });
+    await load();
+    if (changes.length > 0) showToast(`${changes.length}个球员分数变化`);
+    else showToast("所有分数已更新");
+  };
+
+  const createFromRec = (rec) => {
+    setView("new_from_rec");
+    setDetailId(rec);
+  };
+
   if (view === "new") return <NewInvestmentScreen onBack={() => setView("list")} onDone={() => { setView("list"); load(); }} />;
+  if (view === "new_from_rec" && detailId) return <NewInvestmentScreen onBack={() => setView("list")} onDone={() => { setView("list"); load(); }} prefill={detailId} />;
   if (view === "detail" && detailId) return <InvestmentDetailScreen id={detailId} cards={cards} onBack={() => { setView("list"); load(); }} />;
 
   const dist = { strong:0, mid:0, weak:0, avoid:0 };
   const signals = { buy:0, accumulate:0, hold:0, reduce:0 };
+  const staleInvestments = [];
+  const now = Date.now();
   investments.forEach(i => {
     const s = i.action_score;
     if (s != null) { if (s >= 75) dist.strong++; else if (s >= 60) dist.mid++; else if (s >= 40) dist.weak++; else dist.avoid++; }
     const sig = i.status_signal || "hold";
     if (sig in signals) signals[sig]++;
+    if (i.updated_at) {
+      const days = Math.floor((now - new Date(i.updated_at).getTime()) / (1000*60*60*24));
+      if (days > 30) staleInvestments.push({ ...i, staleDays: days, level: days > 90 ? "red" : "orange" });
+    }
   });
   const totalPositions = investments.reduce((s, i) => s + (i.position_count || 0), 0);
 
@@ -2089,6 +2169,101 @@ function InvestmentScreen() {
       </div>
 
       <div style={{ padding:"16px 20px 0" }}>
+        {/* AI Discovery Section */}
+        <div style={{ background:"linear-gradient(135deg,rgba(100,210,255,0.05),rgba(155,109,255,0.04))", border:"1px solid rgba(100,210,255,0.15)", borderRadius:16, padding:"16px", marginBottom:16 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+              <span style={{ fontSize:18 }}>🤖</span>
+              <span style={{ fontFamily:"'Space Mono',monospace", fontSize:11, fontWeight:700, color:T.text, letterSpacing:0.5 }}>AI 发现</span>
+            </div>
+            <button onClick={fetchRecommendations} disabled={recLoading} style={{ padding:"6px 12px", borderRadius:8, border:`1px solid rgba(100,210,255,0.3)`, background:"rgba(100,210,255,0.08)", color:"#64D2FF", fontSize:11, fontWeight:600, cursor:recLoading?"not-allowed":"pointer" }}>
+              {recLoading ? "分析中..." : recCachedAt ? "刷新" : "获取推荐"}
+            </button>
+          </div>
+
+          {recLoading && (
+            <div style={{ textAlign:"center", padding:"20px 0" }}>
+              <div style={{ fontSize:24, marginBottom:8, animation:"pulse 1.5s ease infinite" }}>🤖</div>
+              <div style={{ fontSize:12, color:T.muted }}>AI 正在分析市场...</div>
+            </div>
+          )}
+
+          {recError && <div style={{ fontSize:12, color:T.red, marginBottom:8 }}>{recError}</div>}
+
+          {!recLoading && recommendations && recommendations.length > 0 && (
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {recommendations.map((rec, i) => (
+                <div key={i} style={{ background:T.s2, border:`1px solid ${T.border}`, borderRadius:12, padding:"12px" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
+                    <div>
+                      <div style={{ fontSize:14, fontWeight:700, color:T.text }}>{rec.player_name_cn || rec.player_name}</div>
+                      {rec.player_name_cn && <div style={{ fontSize:11, color:T.dim, marginTop:1 }}>{rec.player_name}</div>}
+                    </div>
+                    <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                      <span style={{ fontFamily:"'Space Mono',monospace", fontSize:16, fontWeight:700, color:actionColor(rec.estimated_action) }}>{rec.estimated_action}</span>
+                    </div>
+                  </div>
+                  <div style={{ fontSize:12, color:T.muted, lineHeight:1.5, marginBottom:8 }}>{rec.reason}</div>
+                  <div style={{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap" }}>
+                    <span style={{ fontSize:10, color:T.blue }}>Q:{rec.estimated_q}</span>
+                    <span style={{ fontSize:10, color:T.gold }}>T:{rec.estimated_t}</span>
+                    {rec.catalyst && <span style={{ fontSize:10, color:T.muted }}>催化：{rec.catalyst}</span>}
+                  </div>
+                  <button onClick={() => createFromRec(rec)} style={{ marginTop:8, width:"100%", padding:"8px", borderRadius:8, border:`1px solid ${T.borderGold}`, background:"rgba(200,168,75,0.06)", color:T.gold, fontSize:12, fontWeight:600, cursor:"pointer" }}>
+                    创建追踪
+                  </button>
+                </div>
+              ))}
+              {recCachedAt && <div style={{ fontSize:10, color:T.dim, textAlign:"right" }}>生成于 {new Date(recCachedAt).toLocaleDateString("zh-CN")}</div>}
+            </div>
+          )}
+
+          {!recLoading && !recommendations && !recError && (
+            <div style={{ textAlign:"center", padding:"12px 0", fontSize:12, color:T.dim }}>点击「获取推荐」让 AI 分析市场热点</div>
+          )}
+        </div>
+
+        {/* Batch Refresh + Staleness Alerts */}
+        {investments.length > 0 && (
+          <div style={{ display:"flex", gap:8, marginBottom:16, alignItems:"stretch" }}>
+            <button onClick={batchRefresh} disabled={batchRefreshing} style={{ flex:1, padding:"12px 16px", borderRadius:12, border:"none", background:batchRefreshing?T.s2:`linear-gradient(135deg,${T.gold},${T.goldDark})`, color:batchRefreshing?T.dim:"#000", fontSize:13, fontWeight:700, cursor:batchRefreshing?"not-allowed":"pointer" }}>
+              {batchRefreshing ? `正在评估 ${batchProgress.current}/${batchProgress.total}...` : "🔄 全部刷新"}
+            </button>
+          </div>
+        )}
+
+        {batchResult && (
+          <div style={{ padding:"10px 14px", borderRadius:12, background:"rgba(48,209,88,0.06)", border:"1px solid rgba(48,209,88,0.2)", marginBottom:14, animation:"fadeUp 0.3s ease both" }}>
+            <div style={{ fontSize:12, color:T.green, fontWeight:600, marginBottom:4 }}>刷新完成</div>
+            {batchResult.changes.length > 0 ? (
+              <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+                {batchResult.changes.map((c, i) => (
+                  <div key={i} style={{ fontSize:11, color:T.muted }}>
+                    {c.name}: {c.oldAction ?? "—"} → <span style={{ fontWeight:700, color:actionColor(c.newAction) }}>{c.newAction}</span>
+                    <span style={{ color:c.delta>0?T.green:T.red, marginLeft:4 }}>({c.delta>0?"+":""}{c.delta})</span>
+                  </div>
+                ))}
+              </div>
+            ) : <div style={{ fontSize:11, color:T.muted }}>所有球员分数无显著变化</div>}
+          </div>
+        )}
+
+        {/* Staleness Alerts */}
+        {staleInvestments.length > 0 && (
+          <div style={{ marginBottom:14 }}>
+            {staleInvestments.map(inv => (
+              <div key={inv.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 12px", borderRadius:10, background:inv.level==="red"?"rgba(255,69,58,0.06)":"rgba(255,159,10,0.06)", border:`1px solid ${inv.level==="red"?"rgba(255,69,58,0.2)":"rgba(255,159,10,0.2)"}`, marginBottom:6, cursor:"pointer" }}
+                onClick={() => { setDetailId(inv.id); setView("detail"); }}>
+                <span style={{ fontSize:12 }}>{inv.level==="red"?"🔴":"🟠"}</span>
+                <span style={{ fontSize:12, color:inv.level==="red"?T.red:T.orange, flex:1 }}>
+                  {inv.player_name_cn||inv.player_name} — {inv.staleDays}天未评估
+                </span>
+                <span style={{ fontSize:10, color:T.dim }}>{inv.level==="red"?"建议立即刷新":"建议刷新"}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Portfolio 概览 */}
         <div style={{ background:`linear-gradient(135deg,rgba(201,168,76,0.08),rgba(201,168,76,0.03))`, border:`1px solid ${T.borderGold}`, borderRadius:16, padding:"16px", marginBottom:16 }}>
           <div style={{ fontFamily:"'Space Mono',monospace", fontSize:10, color:T.dim, letterSpacing:1, marginBottom:12 }}>PORTFOLIO OVERVIEW</div>
@@ -2096,7 +2271,6 @@ function InvestmentScreen() {
             <ScoreNum label="追踪球员" value={investments.length} />
             <ScoreNum label="持仓卡片" value={totalPositions} />
           </div>
-          {/* 行动分分布 */}
           <div style={{ marginBottom:12 }}>
             <div style={{ fontFamily:"'Space Mono',monospace", fontSize:9, color:T.dim, letterSpacing:0.5, marginBottom:8 }}>ACTION SCORE DISTRIBUTION</div>
             <div style={{ display:"flex", gap:6 }}>
@@ -2111,7 +2285,6 @@ function InvestmentScreen() {
               ))}
             </div>
           </div>
-          {/* 信号分布 */}
           <div>
             <div style={{ fontFamily:"'Space Mono',monospace", fontSize:9, color:T.dim, letterSpacing:0.5, marginBottom:8 }}>SIGNAL DISTRIBUTION</div>
             <div style={{ display:"flex", gap:6 }}>
@@ -2181,11 +2354,11 @@ function InvestmentCard({ inv, onClick }) {
   );
 }
 
-function NewInvestmentScreen({ onBack, onDone }) {
-  const [step, setStep] = useState(1);
-  const [playerName, setPlayerName] = useState("");
-  const [playerNameCn, setPlayerNameCn] = useState("");
-  const [type, setType] = useState("");
+function NewInvestmentScreen({ onBack, onDone, prefill }) {
+  const [step, setStep] = useState(prefill ? 2 : 1);
+  const [playerName, setPlayerName] = useState(prefill?.player_name || "");
+  const [playerNameCn, setPlayerNameCn] = useState(prefill?.player_name_cn || "");
+  const [type, setType] = useState(prefill ? "investment" : "");
   const [thesis, setThesis] = useState("");
   const [exitRules, setExitRules] = useState({ profit_target:"", stop_loss:"", time_stop_months:"" });
   const [q, setQ] = useState(50);
