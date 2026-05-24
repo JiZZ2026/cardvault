@@ -1828,10 +1828,28 @@ function NewInvestmentScreen({ onBack, onDone }) {
   const [t, setT] = useState(50);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
+  const [aiAnalysis, setAiAnalysis] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const [aiApplied, setAiApplied] = useState(false);
 
   const action = Math.min(q, t);
   const ac = actionColor(action);
   const needExit = type === "investment";
+
+  const fetchAiAnalysis = async () => {
+    const name = playerName || playerNameCn;
+    if (!name) return;
+    setAiLoading(true); setAiError(""); setAiAnalysis(null); setAiApplied(false);
+    try {
+      const r = await fetch("/api/investment-analyze", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ player_name: name }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "分析失败");
+      setAiAnalysis(d);
+      setQ(d.q_score); setT(d.t_score); setAiApplied(true);
+    } catch (e) { setAiError(e.message); }
+    setAiLoading(false);
+  };
 
   const next = () => {
     setErr("");
@@ -1840,6 +1858,8 @@ function NewInvestmentScreen({ onBack, onDone }) {
     if (step === 3 && needExit) {
       if (!exitRules.profit_target && !exitRules.stop_loss && !exitRules.time_stop_months) { setErr("投资类型必须填写 EXIT 规则"); return; }
     }
+    const nextStep = step + 1;
+    if (nextStep === 4 && !aiAnalysis && !aiLoading) fetchAiAnalysis();
     setStep(s => s + 1);
   };
 
@@ -1859,6 +1879,8 @@ function NewInvestmentScreen({ onBack, onDone }) {
         exit_rules: exit,
         q_score: q,
         t_score: t,
+        q_breakdown: aiAnalysis?.q_breakdown || null,
+        t_breakdown: aiAnalysis?.t_breakdown || null,
       });
       onDone();
     } catch (e) { setErr(e.message); setSaving(false); }
@@ -1940,8 +1962,117 @@ function NewInvestmentScreen({ onBack, onDone }) {
           <div style={{ animation:"fadeUp 0.3s ease both" }}>
             <div style={{ fontSize:16, fontWeight:600, color:T.text, marginBottom:4 }}>Q / T 双分制</div>
             <div style={{ fontSize:12, color:T.muted, marginBottom:20, lineHeight:1.6 }}>Q = 资产质量（球员基本面 + 卡的稀有度）；T = 入场时机（当前价格 vs 价值）。行动分 = min(Q, T)，短板决定上限。</div>
-            <ScoreSlider label="Q 资产质量" value={q} onChange={setQ} color={T.blue} />
-            <ScoreSlider label="T 入场时机" value={t} onChange={setT} color={T.gold} />
+
+            {/* AI 分析区域 */}
+            {aiLoading && (
+              <div style={{ background:"linear-gradient(135deg,rgba(100,210,255,0.06),rgba(100,210,255,0.02))", border:`1px solid rgba(100,210,255,0.2)`, borderRadius:16, padding:"24px", textAlign:"center", marginBottom:20 }}>
+                <div style={{ fontSize:28, marginBottom:10, animation:"pulse 1.5s ease infinite" }}>🤖</div>
+                <div style={{ fontSize:14, fontWeight:600, color:T.text, marginBottom:4 }}>AI 正在分析 {playerNameCn || playerName}...</div>
+                <div style={{ fontSize:11, color:T.muted }}>联网搜索球员数据、卡市行情，预计 15-30 秒</div>
+              </div>
+            )}
+
+            {aiError && (
+              <div style={{ background:"rgba(212,80,80,0.06)", border:"1px solid rgba(212,80,80,0.2)", borderRadius:14, padding:"14px", marginBottom:16 }}>
+                <div style={{ fontSize:12, color:T.red, marginBottom:8 }}>AI 分析失败：{aiError}</div>
+                <button onClick={fetchAiAnalysis} style={{ fontSize:12, color:T.gold, background:"none", border:`1px solid ${T.borderGold}`, borderRadius:8, padding:"6px 14px", cursor:"pointer" }}>重试</button>
+              </div>
+            )}
+
+            {aiAnalysis && (() => {
+              const qb = aiAnalysis.q_breakdown;
+              const tb = aiAnalysis.t_breakdown;
+              const QDim = ({ label, max, item }) => (
+                <div style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 0", borderBottom:`1px solid ${T.border}22` }}>
+                  <div style={{ flex:1, fontSize:12, color:T.muted }}>{label}</div>
+                  <div style={{ fontFamily:"'Space Mono',monospace", fontSize:13, fontWeight:700, color:T.blue, minWidth:40, textAlign:"right" }}>{item.score}/{max}</div>
+                  <div style={{ flex:2, fontSize:11, color:T.dim, lineHeight:1.4 }}>{item.reason}</div>
+                </div>
+              );
+              const TDim = ({ label, item }) => (
+                <div style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 0", borderBottom:`1px solid ${T.border}22` }}>
+                  <div style={{ flex:1, fontSize:12, color:T.muted }}>{label}</div>
+                  <div style={{ fontFamily:"'Space Mono',monospace", fontSize:13, fontWeight:700, color:T.gold, minWidth:40, textAlign:"right" }}>{item.score}/{item.max}</div>
+                  <div style={{ flex:2, fontSize:11, color:T.dim, lineHeight:1.4 }}>{item.reason}</div>
+                </div>
+              );
+              const SectionHeader = ({ title, total, max, color }) => (
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0 4px", marginTop:6 }}>
+                  <span style={{ fontSize:12, fontWeight:700, color:T.text }}>{title}</span>
+                  <span style={{ fontFamily:"'Space Mono',monospace", fontSize:14, fontWeight:700, color }}>{total}/{max}</span>
+                </div>
+              );
+              return (
+                <div style={{ background:"linear-gradient(135deg,rgba(100,210,255,0.04),rgba(201,168,76,0.04))", border:`1px solid rgba(100,210,255,0.15)`, borderRadius:16, padding:"16px", marginBottom:20 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12 }}>
+                    <span style={{ fontSize:18 }}>🤖</span>
+                    <span style={{ fontSize:13, fontWeight:700, color:T.text }}>AI 分析结果</span>
+                    <span style={{ fontSize:10, color:T.dim, marginLeft:"auto" }}>可手动调整</span>
+                  </div>
+
+                  {aiAnalysis.summary && (
+                    <div style={{ fontSize:12, color:T.muted, lineHeight:1.6, padding:"8px 10px", background:`${T.s2}88`, borderRadius:10, marginBottom:14 }}>{aiAnalysis.summary}</div>
+                  )}
+
+                  {/* Q 分拆解 */}
+                  <div style={{ background:`rgba(100,210,255,0.06)`, border:`1px solid rgba(100,210,255,0.12)`, borderRadius:12, padding:"12px", marginBottom:12 }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                      <span style={{ fontFamily:"'Space Mono',monospace", fontSize:11, fontWeight:700, color:T.blue, letterSpacing:1 }}>Q 资产质量</span>
+                      <span style={{ fontFamily:"'Space Mono',monospace", fontSize:22, fontWeight:700, color:T.blue }}>{aiAnalysis.q_score}</span>
+                    </div>
+                    {qb && <>
+                      <SectionHeader title="天花板" total={qb.ceiling?.total} max={35} color={T.blue} />
+                      {qb.ceiling?.age_window && <QDim label="年龄窗口" max={8} item={qb.ceiling.age_window} />}
+                      {qb.ceiling?.offense && <QDim label="进攻能力" max={12} item={qb.ceiling.offense} />}
+                      {qb.ceiling?.defense && <QDim label="防守能力" max={5} item={qb.ceiling.defense} />}
+                      {qb.ceiling?.role_certainty && <QDim label="角色确定性" max={10} item={qb.ceiling.role_certainty} />}
+
+                      <SectionHeader title="叙事面" total={qb.narrative?.total} max={25} color={T.blue} />
+                      {qb.narrative?.market_appeal && <QDim label="市场号召力" max={8} item={qb.narrative.market_appeal} />}
+                      {qb.narrative?.entertainment && <QDim label="观赏性" max={7} item={qb.narrative.entertainment} />}
+                      {qb.narrative?.cultural_impact && <QDim label="文化穿透力" max={5} item={qb.narrative.cultural_impact} />}
+                      {qb.narrative?.playoff_narrative && <QDim label="季后赛叙事" max={5} item={qb.narrative.playoff_narrative} />}
+
+                      <SectionHeader title="卡市面" total={qb.card_market?.total} max={25} color={T.blue} />
+                      {qb.card_market?.rc_products && <QDim label="RC 产品线" max={8} item={qb.card_market.rc_products} />}
+                      {qb.card_market?.draft_class_competition && <QDim label="同届竞争" max={7} item={qb.card_market.draft_class_competition} />}
+                      {qb.card_market?.product_cycle && <QDim label="产品周期" max={5} item={qb.card_market.product_cycle} />}
+                      {qb.card_market?.liquidity && <QDim label="流动性" max={5} item={qb.card_market.liquidity} />}
+
+                      <SectionHeader title="修正系数" total={qb.modifier?.total} max="±15" color={qb.modifier?.total >= 0 ? T.green : T.red} />
+                      {qb.modifier?.injury_risk && <QDim label="伤病风险" max={-10} item={qb.modifier.injury_risk} />}
+                      {qb.modifier?.positive_catalyst && <QDim label="正面催化" max={10} item={qb.modifier.positive_catalyst} />}
+                      {qb.modifier?.negative_risk && <QDim label="负面风险" max={-5} item={qb.modifier.negative_risk} />}
+                    </>}
+                  </div>
+
+                  {/* T 分拆解 */}
+                  <div style={{ background:`rgba(201,168,76,0.06)`, border:`1px solid rgba(201,168,76,0.12)`, borderRadius:12, padding:"12px" }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                      <span style={{ fontFamily:"'Space Mono',monospace", fontSize:11, fontWeight:700, color:T.gold, letterSpacing:1 }}>T 入场时机</span>
+                      <span style={{ fontFamily:"'Space Mono',monospace", fontSize:22, fontWeight:700, color:T.gold }}>{aiAnalysis.t_score}</span>
+                    </div>
+                    {tb && <>
+                      {tb.price_position && <TDim label="价格位置" item={tb.price_position} />}
+                      {tb.catalyst_distance && <TDim label="催化剂距离" item={tb.catalyst_distance} />}
+                      {tb.supply_pressure && <TDim label="供给压力" item={tb.supply_pressure} />}
+                      {tb.season_cycle && <TDim label="赛季周期" item={tb.season_cycle} />}
+                      {tb.buyer_pool && <TDim label="买家池深度" item={tb.buyer_pool} />}
+                    </>}
+                  </div>
+
+                  {!aiApplied && (
+                    <button onClick={() => { setQ(aiAnalysis.q_score); setT(aiAnalysis.t_score); setAiApplied(true); }}
+                      style={{ width:"100%", marginTop:12, padding:"10px", borderRadius:10, border:`1px solid ${T.borderGold}`, background:"rgba(201,168,76,0.08)", color:T.gold, fontSize:13, fontWeight:600, cursor:"pointer" }}>
+                      采用 AI 建议分数
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
+
+            <ScoreSlider label="Q 资产质量" value={q} onChange={v => { setQ(v); setAiApplied(false); }} color={T.blue} />
+            <ScoreSlider label="T 入场时机" value={t} onChange={v => { setT(v); setAiApplied(false); }} color={T.gold} />
             <div style={{ background:`linear-gradient(135deg,${ac}18,transparent)`, border:`1px solid ${ac}55`, borderRadius:16, padding:"20px", textAlign:"center", margin:"16px 0" }}>
               <div style={{ fontFamily:"'Space Mono',monospace", fontSize:10, color:T.dim, letterSpacing:1, marginBottom:8 }}>ACTION SCORE = min(Q, T)</div>
               <div style={{ fontFamily:"'Space Mono',monospace", fontSize:48, fontWeight:700, color:ac, lineHeight:1 }}>{action}</div>
