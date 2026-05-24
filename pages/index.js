@@ -2275,6 +2275,16 @@ function NewInvestmentScreen({ onBack, onDone }) {
                     </>}
                   </div>
 
+                  {aiAnalysis.holder_perspective && (
+                    <div style={{ background:"rgba(255,159,10,0.06)", border:"1px solid rgba(255,159,10,0.2)", borderRadius:12, padding:"12px", marginTop:12 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:6 }}>
+                        <span style={{ fontSize:14 }}>👤</span>
+                        <span style={{ fontFamily:"'Space Mono',monospace", fontSize:11, fontWeight:700, color:T.orange, letterSpacing:1 }}>持有者视角</span>
+                      </div>
+                      <div style={{ fontSize:12, color:T.muted, lineHeight:1.6 }}>{aiAnalysis.holder_perspective}</div>
+                    </div>
+                  )}
+
                   {!aiApplied && (
                     <button onClick={() => { setQ(aiAnalysis.q_score); setT(aiAnalysis.t_score); setAiApplied(true); }}
                       style={{ width:"100%", marginTop:12, padding:"10px", borderRadius:10, border:`1px solid ${T.borderGold}`, background:"rgba(201,168,76,0.08)", color:T.gold, fontSize:13, fontWeight:600, cursor:"pointer" }}>
