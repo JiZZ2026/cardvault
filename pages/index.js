@@ -2349,6 +2349,9 @@ function InvestmentDetailScreen({ id, cards, onBack }) {
   const [sq, setSq] = useState(50);
   const [st, setSt] = useState(50);
 
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshResult, setRefreshResult] = useState(null);
+
   const load = async () => { setLoading(true); const d = await apiGetInvestment(id); setInv(d); if (d) { setSq(d.q_score ?? 50); setSt(d.t_score ?? 50); } setLoading(false); };
   useEffect(() => { load(); }, [id]);
 
@@ -2380,6 +2383,33 @@ function InvestmentDetailScreen({ id, cards, onBack }) {
     catch (e) { alert(e.message); }
     setBusy(false);
   };
+  const refreshScore = async () => {
+    setRefreshing(true); setRefreshResult(null);
+    try {
+      const r = await fetch("/api/investment-analyze", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ player_name: inv.player_name }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "分析失败");
+      setRefreshResult({ newQ: d.q_score, newT: d.t_score, oldQ: inv.q_score, oldT: inv.t_score, q_breakdown: d.q_breakdown, t_breakdown: d.t_breakdown, summary: d.summary });
+    } catch (e) { alert("刷新失败：" + e.message); }
+    setRefreshing(false);
+  };
+  const applyRefresh = async () => {
+    if (!refreshResult) return;
+    setBusy(true);
+    try {
+      await apiUpdateInvestment(id, { q_score: refreshResult.newQ, t_score: refreshResult.newT, q_breakdown: refreshResult.q_breakdown, t_breakdown: refreshResult.t_breakdown });
+      const oldAction = refreshResult.oldQ != null && refreshResult.oldT != null ? Math.min(refreshResult.oldQ, refreshResult.oldT) : null;
+      const newAction = Math.min(refreshResult.newQ, refreshResult.newT);
+      await apiAddCheckpoint(id, {
+        trigger_type: "score_refresh", title: "Q/T分数更新",
+        description: `AI重新评估：Q ${refreshResult.oldQ ?? "—"}→${refreshResult.newQ}, T ${refreshResult.oldT ?? "—"}→${refreshResult.newT}, 行动分 ${oldAction ?? "—"}→${newAction}`,
+        q_score_snapshot: refreshResult.newQ, t_score_snapshot: refreshResult.newT, action_score_snapshot: newAction,
+      });
+      setRefreshResult(null); await load();
+    } catch (e) { alert(e.message); }
+    setBusy(false);
+  };
+
   const linkCard = async (c) => {
     setBusy(true);
     const desc = [c.year, c.series, c.parallel, c.numbered].filter(Boolean).join(" ") || c.player;
@@ -2450,17 +2480,83 @@ function InvestmentDetailScreen({ id, cards, onBack }) {
         </div>
 
         {/* 2. Q/T/行动分 三圆环 */}
-        <div style={{ background:`linear-gradient(135deg,${ac}10,transparent)`, border:`1px solid ${ac}33`, borderRadius:16, padding:"20px 8px 12px", marginBottom:16 }}>
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"center" }}>
-            <ScoreRing value={inv.q_score} max={100} size={85} color={T.blue} label="Q 质量" thick={5} />
-            <ScoreRing value={inv.t_score} max={100} size={85} color={T.gold} label="T 时机" thick={5} />
-            <ScoreRing value={inv.action_score} max={100} size={95} color={ac} label="行动分" thick={6} />
-          </div>
-          <div style={{ textAlign:"center", marginTop:10, fontSize:13, fontWeight:700, color:ac }}>{actionAdvice(inv.action_score)}</div>
-          {/* 持有者视角 */}
-          {inv.t_score != null && (
-            <div style={{ textAlign:"center", marginTop:6, fontSize:12, color:T.muted }}>{holderAdvice(inv.t_score, isHolder)}</div>
+        <div style={{ background:`linear-gradient(135deg,${ac}10,transparent)`, border:`1px solid ${ac}33`, borderRadius:16, padding:"20px 8px 12px", marginBottom:16, position:"relative" }}>
+          <button onClick={refreshScore} disabled={refreshing || busy} style={{ position:"absolute", top:12, right:12, background:"none", border:`1px solid ${T.border}`, borderRadius:8, padding:"5px 8px", cursor:"pointer", color:T.muted, fontSize:14, lineHeight:1, transition:"all 0.2s" }}>
+            <span style={{ display:"inline-block", animation: refreshing ? "spin 1s linear infinite" : "none" }}>🔄</span>
+          </button>
+          {refreshing && (
+            <div style={{ textAlign:"center", padding:"30px 0", animation:"fadeUp 0.2s ease both" }}>
+              <div style={{ fontSize:13, color:T.gold, marginBottom:6 }}>正在重新评估...</div>
+              <div style={{ fontSize:11, color:T.dim }}>AI 正在搜索最新数据并重新打分</div>
+            </div>
           )}
+          {!refreshing && !refreshResult && <>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <ScoreRing value={inv.q_score} max={100} size={85} color={T.blue} label="Q 质量" thick={5} />
+              <ScoreRing value={inv.t_score} max={100} size={85} color={T.gold} label="T 时机" thick={5} />
+              <ScoreRing value={inv.action_score} max={100} size={95} color={ac} label="行动分" thick={6} />
+            </div>
+            <div style={{ textAlign:"center", marginTop:10, fontSize:13, fontWeight:700, color:ac }}>{actionAdvice(inv.action_score)}</div>
+            {inv.t_score != null && (
+              <div style={{ textAlign:"center", marginTop:6, fontSize:12, color:T.muted }}>{holderAdvice(inv.t_score, isHolder)}</div>
+            )}
+          </>}
+          {!refreshing && refreshResult && (() => {
+            const dq = refreshResult.newQ - (refreshResult.oldQ ?? 0);
+            const dt = refreshResult.newT - (refreshResult.oldT ?? 0);
+            const oldA = refreshResult.oldQ != null && refreshResult.oldT != null ? Math.min(refreshResult.oldQ, refreshResult.oldT) : null;
+            const newA = Math.min(refreshResult.newQ, refreshResult.newT);
+            const da = oldA != null ? newA - oldA : null;
+            const crossedZone = oldA != null && (
+              (oldA >= 60 && newA < 40) || (oldA >= 40 && newA < 40) || (oldA < 60 && newA >= 75) || (oldA >= 75 && newA < 60)
+            );
+            const arrow = (d) => d > 0 ? `↑${d}` : d < 0 ? `↓${Math.abs(d)}` : "—";
+            const arrowColor = (d) => d > 0 ? T.green : d < 0 ? T.red : T.dim;
+            return (
+              <div style={{ animation:"fadeUp 0.2s ease both" }}>
+                <div style={{ fontFamily:"'Space Mono',monospace", fontSize:10, color:T.dim, letterSpacing:1, textAlign:"center", marginBottom:12 }}>新旧分数对比</div>
+                <div style={{ display:"flex", justifyContent:"center", gap:20 }}>
+                  {[{ label:"Q 质量", oldV:refreshResult.oldQ, newV:refreshResult.newQ, d:dq, color:T.blue },
+                    { label:"T 时机", oldV:refreshResult.oldT, newV:refreshResult.newT, d:dt, color:T.gold },
+                    { label:"行动分", oldV:oldA, newV:newA, d:da, color:actionColor(newA) }
+                  ].map(item => (
+                    <div key={item.label} style={{ textAlign:"center", flex:1 }}>
+                      <div style={{ fontSize:9, color:T.dim, marginBottom:4 }}>{item.label}</div>
+                      <div style={{ display:"flex", alignItems:"baseline", justifyContent:"center", gap:4 }}>
+                        <span style={{ fontFamily:"'Space Mono',monospace", fontSize:12, color:T.dim }}>{item.oldV ?? "—"}</span>
+                        <span style={{ fontSize:10, color:T.dim }}>→</span>
+                        <span style={{ fontFamily:"'Space Mono',monospace", fontSize:22, fontWeight:700, color:item.color }}>{item.newV}</span>
+                      </div>
+                      {item.d != null && <div style={{ fontFamily:"'Space Mono',monospace", fontSize:11, color:arrowColor(item.d), marginTop:2 }}>({arrow(item.d)})</div>}
+                    </div>
+                  ))}
+                </div>
+                {crossedZone && (
+                  <div style={{ textAlign:"center", marginTop:10, padding:"6px 12px", background:"rgba(255,69,58,0.1)", border:"1px solid rgba(255,69,58,0.3)", borderRadius:8, fontSize:12, color:T.red, fontWeight:600 }}>
+                    ⚠️ 行动分跨越决策区间！{oldA != null && newA < oldA ? "风险升高，请重新评估策略" : "机会改善，可考虑调整仓位"}
+                  </div>
+                )}
+                {refreshResult.summary && <div style={{ fontSize:11, color:T.muted, textAlign:"center", marginTop:8, lineHeight:1.5 }}>{refreshResult.summary}</div>}
+                <div style={{ display:"flex", gap:8, marginTop:14 }}>
+                  <button onClick={() => setRefreshResult(null)} style={{ flex:1, padding:"10px", borderRadius:10, border:`1px solid ${T.border}`, background:"transparent", color:T.muted, fontSize:12, fontWeight:600, cursor:"pointer" }}>保持原分数</button>
+                  <button onClick={applyRefresh} disabled={busy} style={{ flex:1, padding:"10px", borderRadius:10, border:"none", background: busy ? T.s3 : `linear-gradient(135deg,${T.gold},${T.goldDark})`, color: busy ? T.dim : "#000", fontSize:12, fontWeight:700, cursor:"pointer" }}>{busy ? "应用中..." : "应用新分数"}</button>
+                </div>
+              </div>
+            );
+          })()}
+          {!refreshing && !refreshResult && (() => {
+            const hist = Array.isArray(inv.score_history) ? inv.score_history : [];
+            const lastEntry = hist.length > 0 ? hist[hist.length - 1] : null;
+            const lastDate = lastEntry?.at ? new Date(lastEntry.at) : (inv.updated_at ? new Date(inv.updated_at) : null);
+            if (!lastDate) return null;
+            const daysAgo = Math.floor((Date.now() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
+            const stale = daysAgo > 30;
+            return (
+              <div style={{ textAlign:"center", marginTop:8, fontSize:10, color: stale ? T.orange : T.dim }}>
+                上次评估：{daysAgo === 0 ? "今天" : `${daysAgo}天前`}{stale ? " ⚠️ 建议重新评估" : ""}
+              </div>
+            );
+          })()}
         </div>
 
         {/* 3. THESIS 全文卡片（可展开） */}
