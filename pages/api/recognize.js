@@ -17,11 +17,14 @@ function extractJSON(text) {
 async function fetchContext() {
   const parts = [];
 
-  const { data: dist } = await supabase
-    .from("cards")
-    .select("series, year, parallel")
-    .order("created_at", { ascending: false })
-    .limit(30);
+  const [distResult, pcPlayersResult, correctionsResult] = await Promise.all([
+    supabase.from("cards").select("series, year, parallel").order("created_at", { ascending: false }).limit(30),
+    supabase.from("cards").select("pc_player").not("pc_player", "is", null).neq("pc_player", ""),
+    supabase.from("recognition_corrections").select("original, corrected, field_diffs, series").order("created_at", { ascending: false }).limit(10),
+  ]);
+  const dist = distResult.data;
+  const pcPlayers = pcPlayersResult.data;
+  const corrections = correctionsResult.data;
 
   if (dist && dist.length > 0) {
     const counts = {};
@@ -35,22 +38,10 @@ async function fetchContext() {
     }
   }
 
-  const { data: pcPlayers } = await supabase
-    .from("cards")
-    .select("pc_player")
-    .not("pc_player", "is", null)
-    .neq("pc_player", "");
-
   if (pcPlayers && pcPlayers.length > 0) {
     const unique = [...new Set(pcPlayers.map(r => r.pc_player))];
     parts.push(`PC球员（用户重点收集）：${unique.join(", ")}。`);
   }
-
-  const { data: corrections } = await supabase
-    .from("recognition_corrections")
-    .select("original, corrected, field_diffs, series")
-    .order("created_at", { ascending: false })
-    .limit(10);
 
   if (corrections && corrections.length > 0) {
     const tips = corrections.map(c => {
@@ -129,7 +120,7 @@ Step 4 - 读取编号、卡号、评级：查看卡背或卡面的卡号、限�
   try {
     const message = await client.messages.create({
       model: "claude-opus-4-6",
-      max_tokens: 1024,
+      max_tokens: 512,
       messages: [{ role: "user", content }],
     });
 

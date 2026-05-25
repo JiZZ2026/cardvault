@@ -125,37 +125,25 @@ export default async function handler(req, res) {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
   let benchmarkContext = "";
-  try {
-    const { data: benchmarks } = await supabase
-      .from("price_benchmarks")
-      .select("*")
-      .order("updated_at", { ascending: false })
-      .limit(50);
-    if (benchmarks && benchmarks.length > 0) {
-      benchmarkContext = `\n## 天花板价格参照表（来自数据库，优先使用）\n\n${benchmarks.map(b => `- ${b.player_name} (${b.tier}级): ${b.card_description} | 裸卡¥${b.raw_price_cny || "?"} | PSA10¥${b.psa10_price_cny || "?"} | 成交量${b.transaction_volume || "?"}`).join("\n")}\n`;
-    } else {
-      benchmarkContext = `\n## 天花板价格参照表（硬编码基准）\n\n${FALLBACK_BENCHMARKS}\n`;
-    }
-  } catch (e) {
-    console.error("Benchmark query error:", e);
+  let holderContext = "";
+
+  const [benchmarkResult, heldCardsResult] = await Promise.all([
+    supabase.from("price_benchmarks").select("*").order("updated_at", { ascending: false }).limit(50).then(r => r).catch(e => { console.error("Benchmark query error:", e); return { data: null }; }),
+    supabase.from("cards").select("player, series, parallel, grade, buy_price, status").or(`player.ilike.%${player_name}%`).limit(20).then(r => r).catch(e => { console.error("Held cards query error:", e); return { data: null }; }),
+  ]);
+
+  const benchmarks = benchmarkResult.data;
+  if (benchmarks && benchmarks.length > 0) {
+    benchmarkContext = `\n## 天花板价格参照表（来自数据库，优先使用）\n\n${benchmarks.map(b => `- ${b.player_name} (${b.tier}级): ${b.card_description} | 裸卡¥${b.raw_price_cny || "?"} | PSA10¥${b.psa10_price_cny || "?"} | 成交量${b.transaction_volume || "?"}`).join("\n")}\n`;
+  } else {
     benchmarkContext = `\n## 天花板价格参照表（硬编码基准）\n\n${FALLBACK_BENCHMARKS}\n`;
   }
 
-  let holderContext = "";
-  try {
-    const { data: heldCards } = await supabase
-      .from("cards")
-      .select("player, series, parallel, grade, buy_price, status")
-      .or(`player.ilike.%${player_name}%`)
-      .limit(20);
-    if (heldCards && heldCards.length > 0) {
-      holderContext = `\n## 用户持仓信息\n\n用户已经持有该球员 ${heldCards.length} 张卡片：\n${heldCards.map(c => `- ${c.series || "?"} ${c.parallel || "Base"} ${c.grade ? `(${c.grade})` : "RAW"} | 买入价¥${c.buy_price || "?"} | 状态:${c.status || "holding"}`).join("\n")}\n\n⚠️ 因为用户已持有该球员卡片，请在 holder_perspective 字段给出持有者视角的建议（T分高=市场冷=继续持有等待, T分低=催化剂到来=考虑出货）。\n`;
-    } else {
-      holderContext = "\n## 用户持仓信息\n\n用户当前未持有该球员任何卡片。holder_perspective 设为 null。\n";
-    }
-  } catch (e) {
-    console.error("Held cards query error:", e);
-    holderContext = "\n## 用户持仓信息\n\n无法查询持仓数据。holder_perspective 设为 null。\n";
+  const heldCards = heldCardsResult.data;
+  if (heldCards && heldCards.length > 0) {
+    holderContext = `\n## 用户持仓信息\n\n用户已经持有该球员 ${heldCards.length} 张卡片：\n${heldCards.map(c => `- ${c.series || "?"} ${c.parallel || "Base"} ${c.grade ? `(${c.grade})` : "RAW"} | 买入价¥${c.buy_price || "?"} | 状态:${c.status || "holding"}`).join("\n")}\n\n⚠️ 因为用户已持有该球员卡片，请在 holder_perspective 字段给出持有者视角的建议（T分高=市场冷=继续持有等待, T分低=催化剂到来=考虑出货）。\n`;
+  } else {
+    holderContext = "\n## 用户持仓信息\n\n用户当前未持有该球员任何卡片。holder_perspective 设为 null。\n";
   }
 
   const today = new Date().toISOString().split("T")[0];

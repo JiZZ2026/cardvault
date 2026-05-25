@@ -18,27 +18,31 @@ export default async function handler(req, res) {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
   let collectionContext = "";
-  try {
-    const { data: cards } = await supabase
-      .from("cards")
-      .select("player, series, year, parallel, category, buy_price, status")
-      .limit(200);
+  let existingTracking = "";
+  let benchmarkContext = "";
 
-    if (cards?.length) {
-      const playerCounts = {};
-      const seriesCounts = {};
-      const prices = [];
-      cards.forEach(c => {
-        playerCounts[c.player] = (playerCounts[c.player] || 0) + 1;
-        if (c.series) seriesCounts[c.series] = (seriesCounts[c.series] || 0) + 1;
-        if (c.buy_price) prices.push(parseFloat(c.buy_price));
-      });
-      const topPlayers = Object.entries(playerCounts).sort((a, b) => b[1] - a[1]).slice(0, 8);
-      const topSeries = Object.entries(seriesCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
-      const avgPrice = prices.length ? Math.round(prices.reduce((s, p) => s + p, 0) / prices.length) : 0;
-      const maxPrice = prices.length ? Math.max(...prices) : 0;
+  const [cardsResult, investmentsResult, benchmarksResult] = await Promise.all([
+    supabase.from("cards").select("player, series, year, parallel, category, buy_price, status").limit(200).then(r => r).catch(e => { console.error("Collection context error:", e); return { data: null }; }),
+    supabase.from("player_investments").select("player_name, investment_type, action_score").eq("status", "active").then(r => r).catch(e => { console.error("Existing tracking error:", e); return { data: null }; }),
+    supabase.from("price_benchmarks").select("*").order("updated_at", { ascending: false }).limit(30).then(r => r).catch(e => { return { data: null }; }),
+  ]);
 
-      collectionContext = `
+  const cards = cardsResult.data;
+  if (cards?.length) {
+    const playerCounts = {};
+    const seriesCounts = {};
+    const prices = [];
+    cards.forEach(c => {
+      playerCounts[c.player] = (playerCounts[c.player] || 0) + 1;
+      if (c.series) seriesCounts[c.series] = (seriesCounts[c.series] || 0) + 1;
+      if (c.buy_price) prices.push(parseFloat(c.buy_price));
+    });
+    const topPlayers = Object.entries(playerCounts).sort((a, b) => b[1] - a[1]).slice(0, 8);
+    const topSeries = Object.entries(seriesCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    const avgPrice = prices.length ? Math.round(prices.reduce((s, p) => s + p, 0) / prices.length) : 0;
+    const maxPrice = prices.length ? Math.max(...prices) : 0;
+
+    collectionContext = `
 ## 用户收藏画像
 - 总卡片数：${cards.length}
 - 常收球星：${topPlayers.map(([n, c]) => `${n}(${c}张)`).join("、")}
@@ -46,37 +50,17 @@ export default async function handler(req, res) {
 - 价位段：均价¥${avgPrice}，最高¥${maxPrice}
 - PC球员偏好：${cards.filter(c => c.category === "PC").map(c => c.player).filter((v, i, a) => a.indexOf(v) === i).join("、") || "无"}
 `;
-    }
-  } catch (e) {
-    console.error("Collection context error:", e);
   }
 
-  let existingTracking = "";
-  try {
-    const { data: investments } = await supabase
-      .from("player_investments")
-      .select("player_name, investment_type, action_score")
-      .eq("status", "active");
-    if (investments?.length) {
-      existingTracking = `\n## 已有投资追踪（避免重复推荐）\n${investments.map(i => `- ${i.player_name} (${i.investment_type}, 行动分${i.action_score ?? "未评"})`).join("\n")}\n`;
-    }
-  } catch (e) {
-    console.error("Existing tracking error:", e);
+  const investments = investmentsResult.data;
+  if (investments?.length) {
+    existingTracking = `\n## 已有投资追踪（避免重复推荐）\n${investments.map(i => `- ${i.player_name} (${i.investment_type}, 行动分${i.action_score ?? "未评"})`).join("\n")}\n`;
   }
 
-  let benchmarkContext = "";
-  try {
-    const { data: benchmarks } = await supabase
-      .from("price_benchmarks")
-      .select("*")
-      .order("updated_at", { ascending: false })
-      .limit(30);
-    if (benchmarks?.length) {
-      benchmarkContext = `\n## 天花板参照表\n${benchmarks.map(b => `- ${b.player_name}: ${b.card_description} RAW¥${b.raw_price_cny || "?"}`).join("\n")}\n`;
-    } else {
-      benchmarkContext = `\n${FALLBACK_BENCHMARKS}\n`;
-    }
-  } catch {
+  const benchmarks = benchmarksResult.data;
+  if (benchmarks?.length) {
+    benchmarkContext = `\n## 天花板参照表\n${benchmarks.map(b => `- ${b.player_name}: ${b.card_description} RAW¥${b.raw_price_cny || "?"}`).join("\n")}\n`;
+  } else {
     benchmarkContext = `\n${FALLBACK_BENCHMARKS}\n`;
   }
 

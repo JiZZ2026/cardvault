@@ -14,30 +14,33 @@ export default async function handler(req, res) {
 
   // GET：返回最新在售扫描结果
   if (req.method === 'GET') {
-    const { data, error } = await supabase
-      .from('scan_results')
-      .select(`*, watch_item:watch_items(
-        id, description, tier, search_keywords_katao,
-        goal:collection_goals(id, title, player_name)
-      )`)
-      .eq('dismissed', false)
-      .order('scanned_at', { ascending: false })
-      .limit(200);
-
-    if (error) return res.status(500).json({ error: error.message });
-
-    // Load active investments for signal tagging
-    let investMap = {};
-    try {
-      const { data: investments } = await supabase
+    const [scanResult, investResult] = await Promise.all([
+      supabase
+        .from('scan_results')
+        .select(`*, watch_item:watch_items(
+          id, description, tier, search_keywords_katao,
+          goal:collection_goals(id, title, player_name)
+        )`)
+        .eq('dismissed', false)
+        .order('scanned_at', { ascending: false })
+        .limit(200),
+      supabase
         .from('player_investments')
         .select('id, player_name, player_name_cn, exit_rules, action_score, status_signal')
-        .eq('status', 'active');
-      (investments || []).forEach(inv => {
-        const names = [inv.player_name, inv.player_name_cn].filter(Boolean).map(n => n.toLowerCase());
-        names.forEach(n => { investMap[n] = inv; });
-      });
-    } catch (e) { console.error('Investment load for signals:', e.message); }
+        .eq('status', 'active')
+        .then(r => r)
+        .catch(e => { console.error('Investment load for signals:', e.message); return { data: null }; }),
+    ]);
+
+    const { data, error } = scanResult;
+    if (error) return res.status(500).json({ error: error.message });
+
+    // Build investment map for signal tagging
+    let investMap = {};
+    (investResult.data || []).forEach(inv => {
+      const names = [inv.player_name, inv.player_name_cn].filter(Boolean).map(n => n.toLowerCase());
+      names.forEach(n => { investMap[n] = inv; });
+    });
 
     const grouped = {};
     for (const r of (data || [])) {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, createContext, useContext } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, createContext, useContext, memo } from "react";
 import Head from "next/head";
 
 const T = {
@@ -295,7 +295,7 @@ function AppProvider({children}) {
     setDailyHistory(h => [...h.slice(-10), pick.id]);
   }, [cards, dailyHistory]);
 
-  const stats = {
+  const stats = useMemo(() => ({
     total:cards.length, pc:cards.filter(c=>c.category==="PC").length,
     inv:cards.filter(c=>c.category==="investment").length,
     grading:cards.filter(c=>c.status==="grading").length,
@@ -304,7 +304,7 @@ function AppProvider({children}) {
     longhold:cards.filter(c=>c.category==="longhold").length,
     cost:cards.reduce((s,c)=>s+(parseFloat(c.buy_price)||0),0),
     pnl:cards.filter(c=>c.status==="sold"&&c.sell_price).reduce((s,c)=>s+(parseFloat(c.sell_price)||0)-(parseFloat(c.buy_price)||0),0),
-  };
+  }), [cards]);
 
   return <Ctx.Provider value={{cards,pcP,loading,daily,screen,sel,stats,toast,dc,rate,toggleDC,nav,refreshDaily,addCard,updCard,delCard,showToast}}>{children}</Ctx.Provider>;
 }
@@ -320,7 +320,7 @@ function Thumb({card,size=56,ps}) {
     {card?.is_one_of_one&&<div style={{position:"absolute",top:3,right:3,width:8,height:8,borderRadius:"50%",background:T.gold,boxShadow:`0 0 6px ${T.gold}`}} />}
   </div>;
 }
-function CardRow({card,onClick,ps,style={}}) {
+const CardRow = memo(function CardRow({card,onClick,ps,style={}}) {
   const {dc,rate}=useApp(); const st=STATUS[card.status]||STATUS.holding;
   return <div onClick={onClick} style={{display:"flex",gap:14,padding:"12px 14px",borderRadius:16,cursor:"pointer",alignItems:"center",background:T.s2,border:`1px solid ${T.border}`,transition:"all 0.18s",...style}}
     onMouseEnter={e=>{e.currentTarget.style.background=T.s3;}}
@@ -344,7 +344,7 @@ function CardRow({card,onClick,ps,style={}}) {
       {card.location&&<div style={{fontSize:10,color:T.dim,marginTop:3}}>📍{card.location}</div>}
     </div>
   </div>;
-}
+});
 function SHdr({title,sub,action,onAction}) { return <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}><div><span style={{fontSize:17,fontWeight:600,color:T.text,letterSpacing:"-0.3px"}}>{title}</span>{sub&&<span style={{fontSize:12,color:T.muted,marginLeft:6}}>{sub}</span>}</div>{action&&<button onClick={onAction} style={{background:"none",border:"none",color:T.gold,fontSize:13,cursor:"pointer",padding:0,fontWeight:500}}>{action}</button>}</div>; }
 function Skel({width="100%",height=16,radius=6,style={}}) { return <div style={{width,height,borderRadius:radius,background:`linear-gradient(90deg,${T.s2} 25%,${T.s3} 50%,${T.s2} 75%)`,backgroundSize:"200% 100%",animation:"shimmer 1.5s infinite",...style}} />; }
 function ToastView({toast}) { if(!toast)return null; return <div style={{position:"fixed",top:20,left:"50%",transform:"translateX(-50%)",padding:"10px 20px",borderRadius:10,zIndex:999,background:toast.type==="warn"?"rgba(224,120,48,0.9)":"rgba(61,170,106,0.9)",color:"#fff",fontSize:13,fontWeight:600,boxShadow:"0 4px 20px rgba(0,0,0,0.4)",backdropFilter:"blur(8px)",animation:"fadeUp 0.3s ease both",whiteSpace:"nowrap"}}>{toast.msg}</div>; }
@@ -825,18 +825,18 @@ function HomeScreen() {
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const monthNew = cards.filter(c => c.created_at && new Date(c.created_at) >= monthStart).length;
 
-  const signalInvestments = investments.filter(i => {
+  const signalInvestments = useMemo(() => investments.filter(i => {
     const s = i.action_score;
     if (s == null) return false;
     return s >= 60 || s < 40;
-  });
+  }), [investments]);
 
-  const pcCards = pcP.map(p => ({
+  const pcCards = useMemo(() => pcP.map(p => ({
     ...p,
     cards: cards.filter(c => c.player === p.name && c.category === "PC"),
-  }));
+  })), [pcP, cards]);
 
-  const filteredCards = cards.filter(c => {
+  const filteredCards = useMemo(() => cards.filter(c => {
     if (cf !== "all" && c.category !== cf) return false;
     if (q) {
       const terms = expandQ(q);
@@ -844,7 +844,7 @@ function HomeScreen() {
       return terms.some(t => fields.some(f => f.includes(t)));
     }
     return true;
-  });
+  }), [cards, cf, q]);
 
   if (loading) return <div style={{padding:"20px"}}><Skel height={120} radius={16} style={{marginBottom:16}} /><Skel height={80} radius={14} style={{marginBottom:16}} /><Skel height={200} radius={14} style={{marginBottom:16}} /><Skel height={160} radius={14} /></div>;
 
@@ -1000,13 +1000,13 @@ function SearchScreen() {
   const [q,setQ]=useState(""); const [cf,setCf]=useState("all"); const [pf,setPf]=useState("all"); const [yf,setYf]=useState("all");
   const ref=useRef(); useEffect(()=>{setTimeout(()=>ref.current?.focus(),100);},[]);
   const years = ["all",...[...new Set(cards.map(c=>c.year).filter(Boolean))].sort((a,b)=>b.localeCompare(a))];
-  const list=cards.filter(c=>{
+  const list=useMemo(() => cards.filter(c=>{
     if(cf!=="all"&&c.category!==cf)return false;
     if(pf!=="all"&&c.player!==pf)return false;
     if(yf!=="all"&&c.year!==yf)return false;
     if(q){const terms=expandQ(q);const fields=[c.player,c.series,c.parallel,c.card_number,c.numbered,c.grade,c.team,c.sub_series,c.year,...(c.tags||[])].filter(Boolean).map(f=>f.toLowerCase());return terms.some(t=>fields.some(f=>f.includes(t)));}
     return true;
-  });
+  }), [cards, cf, pf, yf, q]);
   return <div style={{paddingBottom:90}}>
     <div style={{padding:"16px 20px 12px",position:"sticky",top:0,background:T.bg,zIndex:10}}>
       <div style={{position:"relative"}}>
@@ -2322,7 +2322,7 @@ function InvestmentScreen() {
   );
 }
 
-function InvestmentCard({ inv, onClick }) {
+const InvestmentCard = memo(function InvestmentCard({ inv, onClick }) {
   const ty = INV_TYPE[inv.investment_type] || INV_TYPE.investment;
   const ac = actionColor(inv.action_score);
   const sig = SIGNAL_MAP[inv.status_signal] || SIGNAL_MAP.hold;
@@ -2352,7 +2352,7 @@ function InvestmentCard({ inv, onClick }) {
       </div>
     </div>
   );
-}
+});
 
 function NewInvestmentScreen({ onBack, onDone, prefill }) {
   const [step, setStep] = useState(prefill ? 2 : 1);

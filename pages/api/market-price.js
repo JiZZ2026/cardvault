@@ -29,7 +29,7 @@ export default async function handler(req, res) {
   // Helper: run one search turn
   async function runWithTool(toolType) {
     const msg1 = await client.messages.create({
-      model: "claude-opus-4-5",
+      model: "claude-sonnet-4-6",
       max_tokens: 1024,
       tools: [{ type: toolType, name: "web_search" }],
       tool_choice: { type: "auto" },
@@ -42,7 +42,7 @@ export default async function handler(req, res) {
     if (msg1.stop_reason === "tool_use") {
       const toolBlock = msg1.content.find(b => b.type === "tool_use");
       const msg2 = await client.messages.create({
-        model: "claude-opus-4-5",
+        model: "claude-sonnet-4-6",
         max_tokens: 1024,
         tools: [{ type: toolType, name: "web_search" }],
         messages: [
@@ -66,24 +66,19 @@ export default async function handler(req, res) {
     return { text, searchUsed };
   }
 
-  // Try each known tool type
-  for (const toolType of ["web_search_20250305", "web_search_20241022", "web_search_20250101"]) {
-    try {
-      const { text, searchUsed } = await runWithTool(toolType);
-      if (text) {
-        return res.json({ success: true, cardDesc, autoDesc, analysis: text, searchUsed, timestamp: new Date().toISOString() });
-      }
-    } catch (e) {
-      const msg = e.message || "";
-      if (msg.includes("tool") || msg.includes("search") || msg.includes("unknown") || msg.includes("invalid")) continue;
-      return res.status(500).json({ error: msg });
+  try {
+    const { text, searchUsed } = await runWithTool("web_search_20250305");
+    if (text) {
+      return res.json({ success: true, cardDesc, autoDesc, analysis: text, searchUsed, timestamp: new Date().toISOString() });
     }
+  } catch (e) {
+    console.error("Web search failed:", e.message);
   }
 
   // Fallback: no web search
   try {
     const fb = await client.messages.create({
-      model: "claude-opus-4-5",
+      model: "claude-sonnet-4-6",
       max_tokens: 800,
       messages: [{ role: "user", content: `根据你对NBA球星卡市场的了解，估算：${cardDesc} 的市场价格区间（人民币+美元），并给简短分析。用中文，结尾注明"⚠️ 估算价格，建议参考实时成交数据"。` }],
     });

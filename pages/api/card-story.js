@@ -18,7 +18,7 @@ export default async function handler(req, res) {
       const mediaType = backImage.includes("image/png") ? "image/png" : "image/jpeg";
 
       const message = await client.messages.create({
-        model: "claude-opus-4-5",
+        model: "claude-sonnet-4-6",
         max_tokens: 600,
         messages: [{
           role: "user",
@@ -38,7 +38,7 @@ export default async function handler(req, res) {
     } else {
       // No back image — generate story from knowledge
       const message = await client.messages.create({
-        model: "claude-opus-4-5",
+        model: "claude-sonnet-4-6",
         max_tokens: 400,
         messages: [{
           role: "user",
