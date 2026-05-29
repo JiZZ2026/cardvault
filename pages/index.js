@@ -214,6 +214,66 @@ const apiGetInvestment = async (id) => { const r = await fetch(`/api/investments
 const apiAddCheckpoint = async (id, body) => { const r = await fetch(`/api/investments/${id}?action=checkpoint`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) }); const d = await r.json(); if (!r.ok) throw new Error(d.error || "添加失败"); return d; };
 const apiLinkCard = async (id, body) => { const r = await fetch(`/api/investments/${id}?action=link-card`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) }); const d = await r.json(); if (!r.ok) throw new Error(d.error || "关联失败"); return d; };
 
+// ── 投资模块（摸金/持仓/价格） API ────────────────────────────────────────────
+const apiGetWatchlist = async () => { const r = await fetch("/api/invest/watchlist"); if (!r.ok) return []; return r.json(); };
+const apiCreateWatch  = async (b) => { const r = await fetch("/api/invest/watchlist", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(b) }); const d = await r.json(); if (!r.ok) throw new Error(d.error || "创建失败"); return d; };
+const apiUpdateWatch  = async (id, b) => { const r = await fetch(`/api/invest/watchlist?id=${id}`, { method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(b) }); const d = await r.json(); if (!r.ok) throw new Error(d.error || "更新失败"); return d; };
+const apiDeleteWatch  = async (id) => { const r = await fetch(`/api/invest/watchlist?id=${id}`, { method:"DELETE" }); const d = await r.json(); if (!r.ok) throw new Error(d.error || "删除失败"); return d; };
+
+const apiGetPositions = async () => { const r = await fetch("/api/invest/positions"); if (!r.ok) return []; return r.json(); };
+const apiCreatePos    = async (b) => { const r = await fetch("/api/invest/positions", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(b) }); const d = await r.json(); if (!r.ok) throw new Error(d.error || "创建失败"); return d; };
+const apiUpdatePos    = async (id, b) => { const r = await fetch(`/api/invest/positions?id=${id}`, { method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(b) }); const d = await r.json(); if (!r.ok) throw new Error(d.error || "更新失败"); return d; };
+const apiDeletePos    = async (id) => { const r = await fetch(`/api/invest/positions?id=${id}`, { method:"DELETE" }); const d = await r.json(); if (!r.ok) throw new Error(d.error || "删除失败"); return d; };
+
+const apiGetPrices    = async (player) => { const r = await fetch(`/api/invest/prices${player ? `?player=${encodeURIComponent(player)}` : ""}`); if (!r.ok) return []; return r.json(); };
+const apiCreatePrice  = async (b) => { const r = await fetch("/api/invest/prices", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(b) }); const d = await r.json(); if (!r.ok) throw new Error(d.error || "录入失败"); return d; };
+const apiDeletePrice  = async (id) => { const r = await fetch(`/api/invest/prices?id=${id}`, { method:"DELETE" }); const d = await r.json(); if (!r.ok) throw new Error(d.error || "删除失败"); return d; };
+
+// 摸金校尉 tier / GH 工具
+const INVEST_COLORS = {
+  target:"#C8A84B", plus_monitor:"#FF9F0A", monitor:"#8E8E93", watch:"#48484A", excluded:"#48484A",
+  profit:"#30D158", loss:"#FF453A", neutral:"#8E8E93", pending:"rgba(255,255,255,0.2)",
+};
+const TIER_META = {
+  target:       { label:"摸金目标", color:INVEST_COLORS.target,       emoji:"🔥" },
+  plus_monitor: { label:"加码监控", color:INVEST_COLORS.plus_monitor, emoji:"⚡" },
+  monitor:      { label:"标准监控", color:INVEST_COLORS.monitor,      emoji:"👀" },
+  watch:        { label:"观望",     color:INVEST_COLORS.watch,        emoji:"📋" },
+  excluded:     { label:"排除",     color:INVEST_COLORS.excluded,     emoji:"—"  },
+};
+const POS_TIER = {
+  core:         { label:"核心", color:T.gold },
+  barbell_big:  { label:"大卡", color:"#9B6DFF" },
+  barbell_small:{ label:"小卡", color:T.blue },
+  spec:         { label:"投机", color:T.orange },
+};
+const POS_STATUS = {
+  held:     { label:"持有", color:T.green },
+  for_sale: { label:"待出", color:T.orange },
+  sold:     { label:"已出", color:T.muted },
+  watching: { label:"竞拍中", color:T.blue },
+};
+const ghColor = (gh) => { if (gh == null) return T.dim; if (gh >= 75) return T.gold; if (gh >= 67) return T.orange; if (gh >= 60) return T.muted; return T.dim; };
+function calcTier(gh, c) {
+  if (gh >= 75) return "target";
+  if (gh >= 67 && c >= 28) return "plus_monitor";
+  if (gh >= 67) return "monitor";
+  if (gh >= 45) return "watch";
+  return "excluded";
+}
+const ghOf = (w) => (Number(w.c_score)||0) + (Number(w.r_score)||0) + (Number(w.r_modifier)||0) + (Number(w.p_score)||0) + (Number(w.m_score)||0);
+
+// 价格模型 v1.0 — Silver 阶梯（硬编码 7 人）
+const SILVER_LADDER = [
+  { player:"Bridges",  cn:"Mikal Bridges",  price:7,   tag:"好首发3D" },
+  { player:"Garland",  cn:"Darius Garland", price:17,  tag:"受伤全明星↓" },
+  { player:"Murray",   cn:"Dejounte Murray",price:58,  tag:"受伤全明星" },
+  { player:"Brunson",  cn:"Jalen Brunson",  price:302, tag:"全明星(纽约)" },
+  { player:"Maxey",    cn:"Tyrese Maxey",   price:188, tag:"全明星(76人)" },
+  { player:"SGA",      cn:"S. Gilgeous-A.", price:520, tag:"MVP级(雷霆)" },
+  { player:"Mitchell", cn:"Donovan Mitchell",price:96, tag:"全明星(骑士)" },
+];
+
 // ── 批量导入 API ──────────────────────────────────────────────────────────────
 const apiBatchValidate = async (cards) => {
   const r = await fetch("/api/batch-import?action=validate", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ cards }) });
@@ -1113,7 +1173,7 @@ function HomeScreen() {
           <div style={{background:T.s2,border:`1px solid ${T.border}`,borderRadius:14,padding:"14px 16px"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
               <span style={{fontFamily:"'Space Mono',monospace",fontSize:10,color:T.dim,letterSpacing:1}}>INVESTMENT SIGNALS</span>
-              <button onClick={()=>nav("invest")} style={{background:"none",border:"none",color:T.gold,fontSize:11,cursor:"pointer",padding:0,fontWeight:500}}>查看全部</button>
+              <button onClick={()=>nav("invest_ai")} style={{background:"none",border:"none",color:T.gold,fontSize:11,cursor:"pointer",padding:0,fontWeight:500}}>查看全部</button>
             </div>
             <div style={{display:"flex",flexDirection:"column",gap:6}}>
               {signalInvestments.slice(0,5).map(inv => {
@@ -1123,7 +1183,7 @@ function HomeScreen() {
                 const icon = s >= 75 ? "🟢" : s >= 60 ? "🟡" : s < 40 ? "🔴" : "🟠";
                 const advice = s >= 75 ? "可建仓" : s >= 60 ? "可吸纳" : s < 40 ? "建议清仓" : "观望";
                 return (
-                  <div key={inv.id} onClick={()=>nav("invest")} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",borderRadius:10,background:`${color}08`,border:`1px solid ${color}22`,cursor:"pointer"}}>
+                  <div key={inv.id} onClick={()=>nav("invest_ai")} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",borderRadius:10,background:`${color}08`,border:`1px solid ${color}22`,cursor:"pointer"}}>
                     <span style={{fontSize:14}}>{icon}</span>
                     <span style={{fontSize:13,color:T.text,fontWeight:600,flex:1}}>{inv.player_name_cn || inv.player_name}</span>
                     <span style={{fontFamily:"'Space Mono',monospace",fontSize:12,fontWeight:700,color}}>{s}</span>
@@ -1134,7 +1194,7 @@ function HomeScreen() {
             </div>
           </div>
         ) : !invLoading && investments.length === 0 ? (
-          <div onClick={()=>nav("invest")} style={{background:T.s2,border:`1px dashed ${T.borderGold}`,borderRadius:14,padding:"16px",cursor:"pointer",textAlign:"center"}}>
+          <div onClick={()=>nav("invest_ai")} style={{background:T.s2,border:`1px dashed ${T.borderGold}`,borderRadius:14,padding:"16px",cursor:"pointer",textAlign:"center"}}>
             <span style={{fontSize:13,color:T.muted}}>开始你的第一个投资追踪</span>
             <span style={{color:T.gold,fontWeight:600,marginLeft:6}}>→</span>
           </div>
@@ -3340,14 +3400,611 @@ function InvestmentDetailScreen({ id, cards, onBack }) {
   );
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// 更多 菜单页
+// ════════════════════════════════════════════════════════════════════════════
+function MoreScreen() {
+  const { nav } = useApp();
+  const items = [
+    { id:"pc",        emoji:"❤️", label:"PC Tracker", sub:"永久收藏进度" },
+    { id:"stats",     emoji:"📊", label:"统计面板",   sub:"成本 / 盈亏 / 分布" },
+    { id:"radar",     emoji:"🎯", label:"雷达",       sub:"市场缺口扫描" },
+    { id:"invest_ai", emoji:"🤖", label:"投资分析 (AI)", sub:"Q/T 双分制评分" },
+    { id:"settings",  emoji:"⚙️", label:"设置",       sub:"汇率 / 货币", disabled:true },
+  ];
+  return (
+    <div style={{ paddingBottom:90 }}>
+      <div style={{ padding:"20px 20px 6px" }}>
+        <h2 style={{ fontSize:24, fontWeight:700, color:T.text, letterSpacing:"-0.5px" }}>☰ 更多</h2>
+      </div>
+      <div style={{ padding:"10px 16px", display:"flex", flexDirection:"column", gap:10 }}>
+        {items.map(it => (
+          <div key={it.id} onClick={()=>!it.disabled && nav(it.id)}
+            style={{ display:"flex", alignItems:"center", gap:14, padding:"16px", borderRadius:14, background:T.s2, border:`1px solid ${T.border}`, cursor:it.disabled?"default":"pointer", opacity:it.disabled?0.45:1 }}>
+            <span style={{ fontSize:22 }}>{it.emoji}</span>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:15, fontWeight:600, color:T.text }}>{it.label}</div>
+              <div style={{ fontSize:11, color:T.muted, marginTop:2 }}>{it.sub}{it.disabled && " · 即将推出"}</div>
+            </div>
+            {!it.disabled && <span style={{ color:T.dim, fontSize:18 }}>→</span>}
+          </div>
+        ))}
+      </div>
+      <div style={{ textAlign:"center", marginTop:24, fontSize:11, color:T.dim, fontFamily:"'Space Mono',monospace" }}>CardVault v1.2</div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 投资模块 — 通用小组件
+// ════════════════════════════════════════════════════════════════════════════
+function Sheet({ title, onClose, children }) {
+  return (
+    <div onClick={onClose} style={{ position:"fixed", inset:0, zIndex:300, background:"rgba(0,0,0,0.6)", backdropFilter:"blur(4px)", display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
+      <div onClick={e=>e.stopPropagation()} style={{ width:"100%", maxWidth:480, maxHeight:"90vh", overflowY:"auto", background:T.surface, borderRadius:"20px 20px 0 0", border:`1px solid ${T.border}`, padding:"18px 18px max(24px, env(safe-area-inset-bottom))", animation:"fadeUp 0.25s ease both" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+          <span style={{ fontSize:17, fontWeight:700, color:T.text }}>{title}</span>
+          <button onClick={onClose} style={{ background:"none", border:"none", color:T.muted, fontSize:22, cursor:"pointer", lineHeight:1 }}>✕</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+function Seg({ value, onChange, options }) {
+  return (
+    <div style={{ display:"flex", gap:2, background:T.s2, borderRadius:10, padding:3 }}>
+      {options.map(([id,label]) => (
+        <button key={id} onClick={()=>onChange(id)} style={{ flex:1, padding:"8px", borderRadius:8, border:"none", background:value===id?T.s3:"transparent", color:value===id?T.gold:T.muted, fontSize:13, fontWeight:value===id?700:400, transition:"all 0.2s", cursor:"pointer" }}>{label}</button>
+      ))}
+    </div>
+  );
+}
+function MiniBar({ label, val, max, color }) {
+  const pct = max ? Math.max(0, Math.min(100, (val/max)*100)) : 0;
+  const isNull = val == null;
+  return (
+    <div style={{ flex:1, minWidth:0 }}>
+      <div style={{ fontSize:10, color:T.dim, marginBottom:3, fontFamily:"'Space Mono',monospace" }}>{label}:{isNull?"待校准":`${val}/${max}`}</div>
+      <div style={{ height:5, borderRadius:3, background:T.s3, overflow:"hidden" }}>
+        <div style={{ width:isNull?"100%":`${pct}%`, height:"100%", background:isNull?"transparent":color, borderRadius:3, border:isNull?`1px dashed ${INVEST_COLORS.pending}`:"none" }} />
+      </div>
+    </div>
+  );
+}
+const fmtY = (n) => `¥${Math.round(Number(n)||0).toLocaleString("zh-CN")}`;
+
+// ════════════════════════════════════════════════════════════════════════════
+// 投资主页 — 持仓 / 摸金 / 价格
+// ════════════════════════════════════════════════════════════════════════════
+function InvestScreen() {
+  const { showToast } = useApp();
+  const [tab, setTab] = useState("positions");
+  const [positions, setPositions] = useState([]);
+  const [watchlist, setWatchlist] = useState([]);
+  const [prices, setPrices] = useState([]);
+  const [err, setErr] = useState(null);
+
+  const loadPositions = async () => { try { setPositions(await apiGetPositions()); } catch(e){ setErr(e.message); } };
+  const loadWatch     = async () => { try { setWatchlist(await apiGetWatchlist()); } catch(e){ setErr(e.message); } };
+  const loadPrices    = async () => { try { setPrices(await apiGetPrices()); } catch(e){ setErr(e.message); } };
+
+  useEffect(() => { loadPositions(); loadWatch(); loadPrices(); }, []);
+
+  return (
+    <div style={{ paddingBottom:90 }}>
+      <div style={{ padding:"20px 20px 0" }}>
+        <h2 style={{ fontSize:24, fontWeight:700, color:T.text, letterSpacing:"-0.5px" }}>📈 投资</h2>
+      </div>
+      <div style={{ margin:"14px 16px 0" }}>
+        <Seg value={tab} onChange={setTab} options={[["positions","持仓"],["hunter","摸金"],["prices","价格"]]} />
+      </div>
+      {err && <div style={{ margin:"12px 16px 0", padding:"10px 14px", borderRadius:10, background:"rgba(255,69,58,0.08)", border:"1px solid rgba(255,69,58,0.2)", fontSize:12, color:T.red }}>数据加载失败：{err}（请确认已在 Supabase 执行建表 SQL）</div>}
+      {tab==="positions" && <PositionsTab positions={positions} reload={loadPositions} showToast={showToast} />}
+      {tab==="hunter"    && <HunterTab watchlist={watchlist} reload={loadWatch} showToast={showToast} />}
+      {tab==="prices"    && <PricesTab prices={prices} reload={loadPrices} showToast={showToast} />}
+    </div>
+  );
+}
+
+// ── 持仓 Tab ─────────────────────────────────────────────────────────────────
+function PositionsTab({ positions, reload, showToast }) {
+  const [editing, setEditing] = useState(null);   // position 对象 or "new"
+  const held = positions.filter(p => p.status === "held");
+
+  const totalCost  = held.reduce((s,p)=>s+(Number(p.cost_basis)||0),0);
+  const totalValue = held.reduce((s,p)=>s+(Number(p.current_value)||Number(p.cost_basis)||0),0);
+  const pnl = totalValue - totalCost;
+  const pnlPct = totalCost ? (pnl/totalCost*100) : 0;
+  const bigCost   = held.filter(p=>p.tier==="core"||p.tier==="barbell_big").reduce((s,p)=>s+(Number(p.cost_basis)||0),0);
+  const smallCost = held.filter(p=>p.tier==="barbell_small"||p.tier==="spec").reduce((s,p)=>s+(Number(p.cost_basis)||0),0);
+  const bigPct = totalCost ? Math.round(bigCost/totalCost*100) : 0;
+
+  // 按球员分组
+  const groups = {};
+  positions.forEach(p => { (groups[p.player_name] ||= []).push(p); });
+  const groupNames = Object.keys(groups);
+
+  return (
+    <div style={{ padding:"14px 16px" }}>
+      {/* 汇总卡片 */}
+      <div style={{ background:T.s2, border:`1px solid ${T.border}`, borderRadius:14, padding:16, marginBottom:16 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", marginBottom:14 }}>
+          <div>
+            <div style={{ fontSize:11, color:T.dim, marginBottom:2 }}>总投入</div>
+            <div style={{ fontSize:18, fontWeight:700, color:T.text }}>{fmtY(totalCost)}</div>
+            <div style={{ fontSize:11, color:T.dim, margin:"8px 0 2px" }}>总市值</div>
+            <div style={{ fontSize:18, fontWeight:700, color:T.text }}>{fmtY(totalValue)}</div>
+          </div>
+          <div style={{ textAlign:"right" }}>
+            <div style={{ fontSize:11, color:T.dim, marginBottom:2 }}>总盈亏</div>
+            <div style={{ fontSize:22, fontWeight:700, color:pnl>=0?INVEST_COLORS.profit:INVEST_COLORS.loss }}>
+              {pnl>=0?"+":"−"}{fmtY(Math.abs(pnl))}
+            </div>
+            <div style={{ fontSize:13, fontWeight:600, color:pnl>=0?INVEST_COLORS.profit:INVEST_COLORS.loss, marginTop:2 }}>
+              {pnl>=0?"↑":"↓"}{Math.abs(pnlPct).toFixed(0)}%
+            </div>
+          </div>
+        </div>
+        {/* 杠铃比 */}
+        <div style={{ height:8, borderRadius:5, background:T.s3, overflow:"hidden", display:"flex" }}>
+          <div style={{ width:`${bigPct}%`, background:`linear-gradient(90deg,${T.gold},${T.goldDark})` }} />
+          <div style={{ width:`${100-bigPct}%`, background:T.blue }} />
+        </div>
+        <div style={{ display:"flex", justifyContent:"space-between", marginTop:6, fontSize:11 }}>
+          <span style={{ color:T.gold }}>大卡 {bigPct}% ({fmtY(bigCost)})</span>
+          <span style={{ color:T.blue }}>小卡 {100-bigPct}% ({fmtY(smallCost)})</span>
+        </div>
+      </div>
+
+      {/* 分组持仓列表 */}
+      {groupNames.length === 0 ? (
+        <div style={{ textAlign:"center", padding:"40px 0", color:T.dim }}>
+          <div style={{ fontSize:32, marginBottom:8 }}>📦</div>
+          <div style={{ fontSize:13 }}>还没有持仓，点右下角 + 录入</div>
+        </div>
+      ) : groupNames.map(name => {
+        const cards = groups[name];
+        const gPnl = cards.filter(c=>c.status!=="sold").reduce((s,c)=>s+((Number(c.current_value)||Number(c.cost_basis)||0)-(Number(c.cost_basis)||0)),0);
+        return (
+          <div key={name} style={{ background:T.s2, border:`1px solid ${T.border}`, borderRadius:14, padding:"12px 14px", marginBottom:12 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+              <span style={{ fontSize:15, fontWeight:700, color:T.text }}>🏀 {name}</span>
+              <span style={{ fontSize:12, color:T.muted }}>{cards.length}张 · <span style={{ color:gPnl>=0?INVEST_COLORS.profit:INVEST_COLORS.loss, fontWeight:600 }}>{gPnl>=0?"+":"−"}{fmtY(Math.abs(gPnl))}</span></span>
+            </div>
+            {cards.map(c => {
+              const cv = Number(c.current_value);
+              const cost = Number(c.cost_basis)||0;
+              const hasVal = c.current_value != null && c.current_value !== "";
+              const pct = hasVal && cost ? ((cv-cost)/cost*100) : null;
+              const st = POS_STATUS[c.status] || POS_STATUS.held;
+              const tierM = POS_TIER[c.tier];
+              const dot = c.status==="sold" ? "⚪" : pct==null ? "⚪" : pct>=0 ? "🟢" : "🔴";
+              return (
+                <div key={c.id} onClick={()=>setEditing(c)} style={{ padding:"8px 0", borderTop:`1px solid ${T.border}`, cursor:"pointer", borderLeft:c.status==="watching"?`2px dashed ${T.blue}`:"none", paddingLeft:c.status==="watching"?8:0 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
+                    <span style={{ fontSize:13, color:T.text, flex:1, minWidth:0 }}>{c.card_description}</span>
+                    <span style={{ fontSize:12, color:T.muted, fontFamily:"'Space Mono',monospace", whiteSpace:"nowrap" }}>
+                      {fmtY(cost)}{hasVal ? `→${fmtY(cv)}` : c.status==="watching" ? "→竞拍中" : "→?"}
+                    </span>
+                  </div>
+                  <div style={{ display:"flex", alignItems:"center", gap:6, marginTop:3 }}>
+                    {tierM && <span style={{ fontSize:9, fontWeight:700, color:tierM.color, background:`${tierM.color}1A`, padding:"1px 6px", borderRadius:4 }}>{tierM.label}</span>}
+                    {c.exit_rule && <span style={{ fontSize:10, color:T.dim }}>{c.exit_rule}</span>}
+                    <span style={{ flex:1 }} />
+                    {c.status==="sold" ? <span style={{ fontSize:11, color:st.color }}>已出</span>
+                      : pct!=null ? <span style={{ fontSize:11, fontWeight:700, color:pct>=0?INVEST_COLORS.profit:INVEST_COLORS.loss }}>{pct>=0?"+":""}{pct.toFixed(0)}% {dot}</span>
+                      : <span style={{ fontSize:11, color:st.color }}>{st.label} {dot}</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+
+      {/* FAB */}
+      <button onClick={()=>setEditing("new")} style={{ position:"fixed", right:"max(20px, calc(50% - 240px + 20px))", bottom:"calc(80px + env(safe-area-inset-bottom))", width:52, height:52, borderRadius:"50%", border:"none", background:`linear-gradient(135deg,${T.gold},${T.goldDark})`, color:"#000", fontSize:26, fontWeight:700, cursor:"pointer", boxShadow:"0 4px 20px rgba(200,168,75,0.45)", zIndex:90 }}>+</button>
+
+      {editing && <PositionForm position={editing==="new"?null:editing} onClose={()=>setEditing(null)} onSaved={()=>{ setEditing(null); reload(); }} showToast={showToast} />}
+    </div>
+  );
+}
+
+function PositionForm({ position, onClose, onSaved, showToast }) {
+  const isEdit = !!position;
+  const [f, setF] = useState(position || { player_name:"", card_description:"", product_line:"Prizm", numbered:"", condition:"RAW", tier:"barbell_small", cost_basis:"", current_value:"", source:"卡淘", exit_rule:"", status:"held", notes:"" });
+  const [saving, setSaving] = useState(false);
+  const set = k => v => setF(p => ({ ...p, [k]:v }));
+
+  const save = async () => {
+    if (!f.player_name || !f.card_description || f.cost_basis==="") { showToast("球员名/描述/成本必填","warn"); return; }
+    setSaving(true);
+    try {
+      if (isEdit) await apiUpdatePos(position.id, f); else await apiCreatePos(f);
+      showToast(isEdit?"✓ 已更新":"✓ 已录入");
+      onSaved();
+    } catch(e){ showToast(e.message,"warn"); setSaving(false); }
+  };
+  const remove = async () => { if (!window.confirm("确认删除这条持仓？")) return; try { await apiDeletePos(position.id); showToast("已删除","warn"); onSaved(); } catch(e){ showToast(e.message,"warn"); } };
+
+  return (
+    <Sheet title={isEdit?"编辑持仓":"录入持仓"} onClose={onClose}>
+      <FF label="球员名" required><Inp value={f.player_name} onChange={set("player_name")} placeholder="如 Reed Sheppard" /></FF>
+      <FF label="卡片描述" required><Inp value={f.card_description} onChange={set("card_description")} placeholder="如 Chrome /150 蓝折签字" /></FF>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+        <FF label="产品线"><Sl value={f.product_line} onChange={set("product_line")} options={[["Prizm","Prizm"],["Chrome","Chrome"],["National Treasures","NT"],["Noir","Noir"],["Select","Select"],["Mosaic","Mosaic"],["其他","其他"]]} /></FF>
+        <FF label="编号"><Inp value={f.numbered} onChange={set("numbered")} type="number" placeholder="99（无编号留空）" /></FF>
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+        <FF label="状态(品相)"><Sl value={f.condition} onChange={set("condition")} options={[["RAW","RAW"],["PSA 10","PSA 10"],["PSA 9","PSA 9"],["BGS 9.5","BGS 9.5"],["微瑕","微瑕"],["瑕","瑕"]]} /></FF>
+        <FF label="仓位类型"><Sl value={f.tier} onChange={set("tier")} options={[["core","核心"],["barbell_big","大卡"],["barbell_small","小卡"],["spec","投机"]]} /></FF>
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+        <FF label="成本 ¥" required><Inp value={f.cost_basis} onChange={set("cost_basis")} type="number" placeholder="0" /></FF>
+        <FF label="当前市值 ¥"><Inp value={f.current_value} onChange={set("current_value")} type="number" placeholder="留空=未估价" /></FF>
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+        <FF label="来源"><Sl value={f.source} onChange={set("source")} options={[["卡淘","卡淘"],["卡淘竞拍","卡淘竞拍"],["eBay","eBay"],["朋友","朋友"],["自拆","自拆"]]} /></FF>
+        <FF label="持仓状态"><Sl value={f.status} onChange={set("status")} options={[["held","持有"],["for_sale","待出"],["watching","竞拍中"],["sold","已出"]]} /></FF>
+      </div>
+      {f.status==="sold" && <FF label="出售价 ¥"><Inp value={f.sell_price} onChange={set("sell_price")} type="number" placeholder="0" /></FF>}
+      <FF label="EXIT 规则"><Inp value={f.exit_rule} onChange={set("exit_rule")} placeholder="如 Phase1出 / 长持3年" /></FF>
+      <FF label="备注"><Inp value={f.notes} onChange={set("notes")} placeholder="备注..." /></FF>
+      <button onClick={save} disabled={saving} style={{ width:"100%", padding:"13px", borderRadius:12, border:"none", background:`linear-gradient(135deg,${T.gold},${T.goldDark})`, color:"#000", fontSize:14, fontWeight:700, cursor:"pointer", marginTop:6 }}>{saving?"保存中...":"保存"}</button>
+      {isEdit && <button onClick={remove} style={{ width:"100%", padding:"11px", borderRadius:12, border:`1px solid rgba(255,69,58,0.2)`, background:"rgba(255,69,58,0.06)", color:T.red, fontSize:13, marginTop:10, cursor:"pointer" }}>删除此持仓</button>}
+    </Sheet>
+  );
+}
+
+// ── 摸金 Tab ─────────────────────────────────────────────────────────────────
+function HunterTab({ watchlist, reload, showToast }) {
+  const [adding, setAdding] = useState(false);
+  const [expanded, setExpanded] = useState(null);
+
+  const counts = { target:0, plus_monitor:0, monitor:0, watch:0 };
+  watchlist.forEach(w => { if (counts[w.monitoring_tier]!=null) counts[w.monitoring_tier]++; });
+
+  return (
+    <div style={{ padding:"14px 16px" }}>
+      {/* 扫描周期汇总 */}
+      <div style={{ background:T.s2, border:`1px solid ${T.border}`, borderRadius:14, padding:16, marginBottom:16 }}>
+        <div style={{ fontSize:14, fontWeight:700, color:T.text, marginBottom:10 }}>摸金校尉 · 2026年5月扫描</div>
+        <div style={{ display:"flex", flexWrap:"wrap", gap:"8px 18px", fontSize:13, color:T.muted }}>
+          <span>🔥 {counts.target} 摸金目标</span>
+          <span>⚡ {counts.plus_monitor} 加码监控</span>
+          <span>👀 {counts.monitor} 标准监控</span>
+          <span>📋 {counts.watch} 观望</span>
+        </div>
+      </div>
+
+      {watchlist.length === 0 ? (
+        <div style={{ textAlign:"center", padding:"40px 0", color:T.dim }}>
+          <div style={{ fontSize:32, marginBottom:8 }}>⛏️</div>
+          <div style={{ fontSize:13 }}>还没有监控球员，点下方新增</div>
+        </div>
+      ) : watchlist.map(w => {
+        const gh = w.gh_index != null ? w.gh_index : ghOf(w);
+        const tierM = TIER_META[w.monitoring_tier] || TIER_META.monitor;
+        const ghPct = Math.min(100, gh/100*100);
+        const hist = Array.isArray(w.score_history) ? w.score_history : [];
+        const isOpen = expanded === w.id;
+        return (
+          <div key={w.id} style={{ background:T.s2, border:`1px solid ${gh>=75?T.borderGold:T.border}`, borderRadius:14, padding:"14px 16px", marginBottom:12 }}>
+            <div onClick={()=>setExpanded(isOpen?null:w.id)} style={{ cursor:"pointer" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                <span style={{ fontSize:15, fontWeight:700, color:T.text }}>{tierM.emoji} {w.player_name}</span>
+                <span style={{ fontSize:11, color:T.muted }}>#{w.draft_pick} · {w.draft_year}届 Y{w.current_scan_year}</span>
+              </div>
+              <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
+                <span style={{ fontSize:26, fontWeight:800, color:ghColor(gh), fontFamily:"'Space Mono',monospace", lineHeight:1 }}>GH {gh}</span>
+                <div style={{ flex:1, height:8, borderRadius:5, background:T.s3, overflow:"hidden" }}>
+                  <div style={{ width:`${ghPct}%`, height:"100%", background:ghColor(gh) }} />
+                </div>
+                <span style={{ fontSize:10, fontWeight:700, color:tierM.color, background:`${tierM.color}1A`, padding:"3px 8px", borderRadius:6, whiteSpace:"nowrap" }}>{tierM.label}</span>
+              </div>
+              {/* 四维 */}
+              <div style={{ display:"flex", gap:10, marginBottom:10 }}>
+                <MiniBar label="C" val={w.c_score} max={40} color={T.gold} />
+                <MiniBar label="R" val={(Number(w.r_score)||0)+(Number(w.r_modifier)||0)} max={35} color={T.blue} />
+                <MiniBar label="P" val={w.p_score} max={25} color={T.green} />
+                <MiniBar label="M" val={w.m_score} max={10} color="#9B6DFF" />
+              </div>
+              {w.release_event && <div style={{ fontSize:12, color:T.muted, marginBottom:3 }}>释放：{w.release_event}</div>}
+              {w.entry_target && <div style={{ fontSize:12, color:T.gold }}>建仓：{w.entry_target}</div>}
+            </div>
+
+            {isOpen && (
+              <div style={{ marginTop:12, paddingTop:12, borderTop:`1px solid ${T.border}` }}>
+                {w.thesis && <div style={{ fontSize:12, color:T.muted, lineHeight:1.7, marginBottom:10 }}>📌 {w.thesis}</div>}
+                {hist.length > 1 && <GHTrend history={hist} />}
+                <div style={{ fontSize:11, color:T.dim, marginTop:8 }}>
+                  C:{w.c_score||0} · R:{(Number(w.r_score)||0)+(Number(w.r_modifier)||0)}{w.r_modifier?`(+${w.r_modifier}修正)`:""} · P:{w.p_score!=null?w.p_score:"待校准"} · M:{w.m_score||0}
+                </div>
+                <button onClick={async()=>{ if(window.confirm(`删除 ${w.player_name} 的监控？`)){ try{ await apiDeleteWatch(w.id); showToast("已删除","warn"); reload(); }catch(e){ showToast(e.message,"warn"); } } }}
+                  style={{ marginTop:10, padding:"6px 12px", borderRadius:8, border:`1px solid rgba(255,69,58,0.2)`, background:"rgba(255,69,58,0.06)", color:T.red, fontSize:11, cursor:"pointer" }}>删除监控</button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      <button onClick={()=>setAdding(true)} style={{ width:"100%", padding:"13px", borderRadius:12, border:`1px dashed ${T.borderGold}`, background:"rgba(200,168,75,0.06)", color:T.gold, fontSize:14, fontWeight:600, cursor:"pointer", marginTop:4 }}>+ 新增监控球员（GH 评分）</button>
+
+      {adding && <HunterForm onClose={()=>setAdding(false)} onSaved={()=>{ setAdding(false); reload(); }} showToast={showToast} />}
+    </div>
+  );
+}
+
+function GHTrend({ history }) {
+  const W = 280, H = 70, pad = 8;
+  const ghs = history.map(h => h.gh ?? 0);
+  const max = Math.max(100, ...ghs), min = Math.min(40, ...ghs);
+  const pts = ghs.map((g,i) => {
+    const x = pad + (ghs.length===1?0:i/(ghs.length-1))*(W-2*pad);
+    const y = H-pad - ((g-min)/(max-min||1))*(H-2*pad);
+    return [x,y];
+  });
+  const line = pts.map(p=>p.join(",")).join(" ");
+  const y75 = H-pad - ((75-min)/(max-min||1))*(H-2*pad);
+  return (
+    <div>
+      <div style={{ fontSize:11, color:T.dim, marginBottom:4 }}>GH 轨迹：{ghs.join(" → ")}</div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%", height:H }}>
+        <line x1={pad} y1={y75} x2={W-pad} y2={y75} stroke={T.gold} strokeWidth="1" strokeDasharray="4 3" opacity="0.6" />
+        <polyline points={line} fill="none" stroke={T.blue} strokeWidth="2" />
+        {pts.map(([x,y],i)=><circle key={i} cx={x} cy={y} r="3" fill={ghs[i]>=75?T.gold:T.blue} />)}
+      </svg>
+      <div style={{ display:"flex", justifyContent:"space-between", fontSize:9, color:T.dim, fontFamily:"'Space Mono',monospace" }}>
+        {history.map((h,i)=><span key={i}>Y{h.scan_year||i+1}</span>)}
+      </div>
+    </div>
+  );
+}
+
+// GH 评分选项（v1.1 公式）
+const C_OPTS = {
+  c1:{ label:"Per-36 产出比", w:10, opts:[["10",">1.5x (10)"],["7","1.3-1.5 (7)"],["4","1.1-1.3 (4)"],["2","<1.1 (2)"],["0","无数据 (0)"]] },
+  c2:{ label:"TS% vs 同届中位", w:8, opts:[["8","高5%+ (8)"],["6","高2-5% (6)"],["4","持平 (4)"],["2","低于 (2)"]] },
+  c3:{ label:"罚球命中率", w:5, opts:[["5",">82% (5)"],["4","78-82% (4)"],["2","73-78% (2)"],["1","<73% (1)"]] },
+  c4:{ label:"出场受限度", w:8, opts:[["8","<15min (8)"],["6","15-20min (6)"],["4","20-25min (4)"],["2",">25min (2)"]] },
+  c5:{ label:"赛季末段提升", w:5, opts:[["5",">15% (5)"],["3","5-15% (3)"],["2","持平 (2)"],["0","下降 (0)"]] },
+  c6:{ label:"starter缺阵爆发", w:4, opts:[["4","打出20+ (4)"],["2","有提升 (2)"],["0","无数据 (0)"]] },
+};
+const R_OPTS = {
+  r1:{ label:"前方starter离开", w:12, opts:[["12","确定离开 (12)"],["9","大概率 (9)"],["6","可能 (6)"],["3","不太可能 (3)"],["0","已首发 (0)"]] },
+  r2:{ label:"重建/转型意图", w:8, opts:[["8","确认重建 (8)"],["5","有倾向 (5)"],["2","竞争中 (2)"],["0","夺冠窗口 (0)"]] },
+  r3:{ label:"管理层保护", w:5, opts:[["5","拒绝交易 (5)"],["3","未引同位置 (3)"],["0","已引援 (0)"]] },
+  r4:{ label:"教练信任", w:5, opts:[["5","crunch time (5)"],["3","稳定轮转 (3)"],["1","边缘 (1)"]] },
+  r5:{ label:"竞争地图", w:5, opts:[["5","前方全清 (5)"],["3","1人挡 (3)"],["1","多人 (1)"]] },
+};
+const RMOD_CONTRACT = [["0","无 (0)"],["5","距RFA1年+薪资紧张 (+5)"],["3","距RFA1年+可能匹配 (+3)"],["4","距UFA1年 (+4)"]];
+const RMOD_REFUSE   = [["0","无 (0)"],["8","两次拒绝续约 (+8)"],["6","公开表达不满 (+6)"],["5","一次拒绝续约 (+5)"]];
+const P_OPTS = {
+  p1:{ label:"/99 绝对价格", w:10, opts:[["10","<¥100 (10)"],["8","¥100-300 (8)"],["5","¥300-800 (5)"],["3","¥800-2000 (3)"],["1",">¥2000 (1)"]] },
+  p2:{ label:"vs 同届最贵比", w:8, opts:[["8","<5% (8)"],["6","5-15% (6)"],["4","15-30% (4)"],["2",">30% (2)"]] },
+  p3:{ label:"价格趋势", w:7, opts:[["7","下跌/地板 (7)"],["5","持平 (5)"],["3","温和涨 (3)"],["1","快速涨/已暴涨 (1)"]] },
+};
+const M_OPTS = [["0","N/A — Y1 / 持平 (0)"],["8","连续2年↑≥8/年+C≥28 (+8)"],["5","连续2年↑≥5/年 (+5)"],["2","上升<5 (+2)"],["-3","下降 (-3)"],["-5","连续下降 (-5)"]];
+const TIER_RULE = {
+  target:"≥75 摸金目标", plus_monitor:"67-74 且 C≥28 加码监控", monitor:"67-74 标准监控", watch:"45-66 观望", excluded:"<45 不符合",
+};
+
+function HunterForm({ onClose, onSaved, showToast }) {
+  const [step, setStep] = useState(1);
+  const [f, setF] = useState({
+    player_name:"", draft_year:"2025", draft_pick:"", team:"", current_scan_year:"1",
+    c1:"0",c2:"0",c3:"0",c4:"0",c5:"0",c6:"0",
+    r1:"0",r2:"0",r3:"0",r4:"0",r5:"0", rmodC:"0", rmodR:"0",
+    pMode:"manual", p1:"0",p2:"0",p3:"0", m:"0",
+    release_type:"unknown", release_event:"", entry_target:"", thesis:"",
+  });
+  const set = k => v => setF(p => ({ ...p, [k]:v }));
+  const [saving, setSaving] = useState(false);
+
+  const c = ["c1","c2","c3","c4","c5","c6"].reduce((s,k)=>s+Number(f[k]||0),0);
+  const r = ["r1","r2","r3","r4","r5"].reduce((s,k)=>s+Number(f[k]||0),0);
+  const rmod = Number(f.rmodC||0)+Number(f.rmodR||0);
+  const pSkipped = f.pMode==="skip";
+  const p = pSkipped ? null : ["p1","p2","p3"].reduce((s,k)=>s+Number(f[k]||0),0);
+  const m = Number(f.m||0);
+  const gh = c + r + rmod + (p||0) + m;
+  const tier = calcTier(gh, c);
+  const tierM = TIER_META[tier];
+
+  const scorer = (group, keyPrefix) => Object.entries(group).map(([k,def]) => (
+    <FF key={k} label={`${def.label} (满${def.w})`}>
+      <Sl value={f[k]} onChange={set(k)} options={def.opts} />
+    </FF>
+  ));
+
+  const save = async () => {
+    if (!f.player_name) { showToast("球员名必填","warn"); return; }
+    setSaving(true);
+    const c_breakdown = { c1:f.c1,c2:f.c2,c3:f.c3,c4:f.c4,c5:f.c5,c6:f.c6 };
+    const r_breakdown = { r1:f.r1,r2:f.r2,r3:f.r3,r4:f.r4,r5:f.r5, contract:f.rmodC, refuse:f.rmodR };
+    const body = {
+      player_name:f.player_name, draft_year:f.draft_year, draft_pick:f.draft_pick, team:f.team,
+      current_scan_year:f.current_scan_year,
+      c_score:c, c_breakdown, r_score:r, r_breakdown, r_modifier:rmod,
+      p_score:pSkipped?null:p, p_note:pSkipped?"待校准":null, m_score:m,
+      release_type:f.release_type, release_event:f.release_event, entry_target:f.entry_target, thesis:f.thesis,
+      monitoring_tier:tier,
+      score_history:[{ scan_year:Number(f.current_scan_year), c, r, r_mod:rmod, p:pSkipped?null:p, m, gh, date:new Date().toISOString().slice(0,10) }],
+    };
+    try { await apiCreateWatch(body); showToast("✓ 已保存"); onSaved(); } catch(e){ showToast(e.message,"warn"); setSaving(false); }
+  };
+
+  const steps = ["基本信息","C分","R分","P&M分","确认"];
+  return (
+    <Sheet title={`新增监控 · ${steps[step-1]}`} onClose={onClose}>
+      {/* 步骤指示 */}
+      <div style={{ display:"flex", gap:4, marginBottom:16 }}>
+        {steps.map((s,i)=><div key={i} style={{ flex:1, height:4, borderRadius:2, background:i<step?T.gold:T.s3 }} />)}
+      </div>
+
+      {step===1 && <>
+        <FF label="球员名" required><Inp value={f.player_name} onChange={set("player_name")} placeholder="如 Jaylen Coward" /></FF>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+          <FF label="选秀年"><Sl value={f.draft_year} onChange={set("draft_year")} options={[["2025","2025"],["2024","2024"],["2023","2023"],["2022","2022"]]} /></FF>
+          <FF label="顺位"><Inp value={f.draft_pick} onChange={set("draft_pick")} type="number" placeholder="11" /></FF>
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+          <FF label="球队"><Inp value={f.team} onChange={set("team")} placeholder="Grizzlies" /></FF>
+          <FF label="当前扫描"><Sl value={f.current_scan_year} onChange={set("current_scan_year")} options={[["1","Y1"],["2","Y2"],["3","Y3"],["4","Y4"]]} /></FF>
+        </div>
+      </>}
+
+      {step===2 && <>
+        {scorer(C_OPTS,"c")}
+        <div style={{ textAlign:"right", fontSize:14, fontWeight:700, color:T.gold }}>C分合计：{c} / 40</div>
+      </>}
+
+      {step===3 && <>
+        {scorer(R_OPTS,"r")}
+        <FF label="R修正器 — 合同年"><Sl value={f.rmodC} onChange={set("rmodC")} options={RMOD_CONTRACT} /></FF>
+        <FF label="R修正器 — 拒绝续约"><Sl value={f.rmodR} onChange={set("rmodR")} options={RMOD_REFUSE} /></FF>
+        <div style={{ textAlign:"right", fontSize:14, fontWeight:700, color:T.blue }}>R分合计：{r}{rmod?` +${rmod}修正`:""} = {r+rmod} / 35</div>
+      </>}
+
+      {step===4 && <>
+        <FF label="P分录入方式"><Sl value={f.pMode} onChange={set("pMode")} options={[["manual","手动填分"],["skip","暂时跳过（待校准）"]]} /></FF>
+        {!pSkipped && <>
+          {scorer(P_OPTS,"p")}
+          <div style={{ textAlign:"right", fontSize:14, fontWeight:700, color:T.green, marginBottom:10 }}>P分合计：{p} / 25</div>
+        </>}
+        {pSkipped && <div style={{ fontSize:12, color:T.dim, marginBottom:10 }}>P分将标记为"待校准"，不计入 GH。</div>}
+        <FF label={`M分 多年动量${f.current_scan_year==="1"?"（Y1 通常为0）":""}`}><Sl value={f.m} onChange={set("m")} options={M_OPTS} /></FF>
+      </>}
+
+      {step===5 && <>
+        <div style={{ background:T.s2, border:`1px solid ${T.borderGold}`, borderRadius:14, padding:16, marginBottom:14, textAlign:"center" }}>
+          <div style={{ fontSize:16, fontWeight:700, color:T.text, marginBottom:4 }}>{f.player_name||"—"}</div>
+          <div style={{ fontSize:30, fontWeight:800, color:ghColor(gh), fontFamily:"'Space Mono',monospace" }}>GH = {gh}</div>
+          <div style={{ fontSize:12, color:T.muted, marginTop:6 }}>C:{c} + R:{r+rmod} + P:{p==null?"待校准":p} + M:{m}</div>
+          <div style={{ marginTop:10, fontSize:13, fontWeight:700, color:tierM.color }}>{tierM.emoji} {tierM.label}</div>
+          <div style={{ fontSize:10, color:T.dim, marginTop:2 }}>({TIER_RULE[tier]})</div>
+        </div>
+        <FF label="释放类型"><Sl value={f.release_type} onChange={set("release_type")} options={[["trade","交易释放"],["departure","去留释放"],["free_agent","FA自走"],["system","体系释放"],["unknown","未知/临时"]]} /></FF>
+        <FF label="释放事件"><Inp value={f.release_event} onChange={set("release_event")} placeholder="如 Morant今夏大概率被交易" /></FF>
+        <FF label="建仓建议"><Inp value={f.entry_target} onChange={set("entry_target")} placeholder="如 Chrome /99签字 ¥345" /></FF>
+        <FF label="投资论点"><Inp value={f.thesis} onChange={set("thesis")} placeholder="一句话逻辑" /></FF>
+      </>}
+
+      {/* 导航按钮 */}
+      <div style={{ display:"flex", gap:10, marginTop:8 }}>
+        {step>1 && <button onClick={()=>setStep(step-1)} style={{ flex:1, padding:"12px", borderRadius:12, border:`1px solid ${T.border}`, background:"transparent", color:T.muted, fontSize:14, cursor:"pointer" }}>上一步</button>}
+        {step<5 && <button onClick={()=>setStep(step+1)} style={{ flex:2, padding:"12px", borderRadius:12, border:"none", background:T.s3, color:T.gold, fontSize:14, fontWeight:700, cursor:"pointer" }}>下一步</button>}
+        {step===5 && <button onClick={save} disabled={saving} style={{ flex:2, padding:"12px", borderRadius:12, border:"none", background:`linear-gradient(135deg,${T.gold},${T.goldDark})`, color:"#000", fontSize:14, fontWeight:700, cursor:"pointer" }}>{saving?"保存中...":"保存"}</button>}
+      </div>
+    </Sheet>
+  );
+}
+
+// ── 价格 Tab ─────────────────────────────────────────────────────────────────
+function PricesTab({ prices, reload, showToast }) {
+  const players = [...new Set(prices.map(p => p.player_name))];
+  const [selected, setSelected] = useState(null);
+  const [adding, setAdding] = useState(false);
+
+  const sel = selected || players[0] || null;
+  const rows = prices.filter(p => p.player_name === sel);
+
+  return (
+    <div style={{ padding:"14px 16px" }}>
+      {/* Silver 阶梯横向滚动 */}
+      <div style={{ fontSize:11, color:T.dim, marginBottom:8, fontFamily:"'Space Mono',monospace" }}>SILVER 阶梯 · 价格模型 v1.0</div>
+      <div style={{ display:"flex", gap:10, overflowX:"auto", paddingBottom:8, marginBottom:18, WebkitOverflowScrolling:"touch" }}>
+        {SILVER_LADDER.map(s => (
+          <div key={s.player} style={{ flexShrink:0, minWidth:108, background:T.s2, border:`1px solid ${T.border}`, borderRadius:12, padding:"10px 12px" }}>
+            <div style={{ fontSize:13, fontWeight:700, color:T.text }}>{s.player}</div>
+            <div style={{ fontSize:18, fontWeight:800, color:T.gold, fontFamily:"'Space Mono',monospace", margin:"2px 0" }}>¥{s.price}</div>
+            <div style={{ fontSize:10, color:T.muted }}>{s.tag}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* 球员选择 */}
+      {players.length > 0 && (
+        <div style={{ display:"flex", gap:8, overflowX:"auto", paddingBottom:8, marginBottom:12 }}>
+          {players.map(p => (
+            <button key={p} onClick={()=>setSelected(p)} style={{ flexShrink:0, padding:"6px 14px", borderRadius:20, border:`1px solid ${p===sel?T.borderGold:T.border}`, background:p===sel?"rgba(200,168,75,0.1)":T.s2, color:p===sel?T.gold:T.muted, fontSize:12, fontWeight:p===sel?700:400, cursor:"pointer" }}>{p}</button>
+          ))}
+        </div>
+      )}
+
+      {/* 详情 */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+        <span style={{ fontSize:15, fontWeight:700, color:T.text }}>{sel || "暂无价格数据"}</span>
+        <button onClick={()=>setAdding(true)} style={{ padding:"6px 12px", borderRadius:8, border:`1px solid ${T.borderGold}`, background:"rgba(200,168,75,0.08)", color:T.gold, fontSize:12, fontWeight:600, cursor:"pointer" }}>+ 录入</button>
+      </div>
+
+      {rows.length === 0 ? (
+        <div style={{ textAlign:"center", padding:"30px 0", color:T.dim, fontSize:13 }}>该球员还没有价格快照</div>
+      ) : (
+        <div style={{ background:T.s2, border:`1px solid ${T.border}`, borderRadius:14, overflow:"hidden" }}>
+          {rows.map((r,i) => (
+            <div key={r.id} onClick={()=>{ if(window.confirm("删除这条价格？")){ apiDeletePrice(r.id).then(()=>{ showToast("已删除","warn"); reload(); }); } }}
+              style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 14px", borderTop:i?`1px solid ${T.border}`:"none", cursor:"pointer" }}>
+              <span style={{ fontSize:13, color:T.text, flex:1, minWidth:0 }}>
+                {r.numbered ? <span style={{ color:T.gold, fontWeight:700 }}>/{r.numbered} </span> : ""}
+                {r.parallel}
+                <span style={{ color:T.dim, fontSize:11 }}> · {r.year} {r.product}</span>
+              </span>
+              <span style={{ fontSize:14, fontWeight:700, color:T.text, fontFamily:"'Space Mono',monospace" }}>{fmtY(r.price)}</span>
+              <span style={{ fontSize:10, color:T.muted, width:42, textAlign:"right" }}>{r.price_condition}</span>
+              <span style={{ fontSize:10, color:T.dim, width:46, textAlign:"right" }}>{r.transaction_count?`${r.transaction_count}笔`:""}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {adding && <PriceForm defaultPlayer={sel} onClose={()=>setAdding(false)} onSaved={()=>{ setAdding(false); reload(); }} showToast={showToast} />}
+    </div>
+  );
+}
+
+function PriceForm({ defaultPlayer, onClose, onSaved, showToast }) {
+  const [f, setF] = useState({ player_name:defaultPlayer||"", year:"19-20", product:"Prizm", parallel:"", numbered:"", price:"", price_condition:"RAW", transaction_count:"", source:"卡淘" });
+  const [saving, setSaving] = useState(false);
+  const set = k => v => setF(p => ({ ...p, [k]:v }));
+  const save = async () => {
+    if (!f.player_name || !f.year || !f.product || !f.parallel || f.price==="") { showToast("球员/年份/产品/平行/价格必填","warn"); return; }
+    setSaving(true);
+    try { await apiCreatePrice(f); showToast("✓ 已录入"); onSaved(); } catch(e){ showToast(e.message,"warn"); setSaving(false); }
+  };
+  return (
+    <Sheet title="录入价格" onClose={onClose}>
+      <FF label="球员名" required><Inp value={f.player_name} onChange={set("player_name")} placeholder="Garland" /></FF>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+        <FF label="年份" required><Inp value={f.year} onChange={set("year")} placeholder="19-20" /></FF>
+        <FF label="产品" required><Inp value={f.product} onChange={set("product")} placeholder="Prizm" /></FF>
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr", gap:12 }}>
+        <FF label="平行版本" required><Inp value={f.parallel} onChange={set("parallel")} placeholder="Blue Ice" /></FF>
+        <FF label="编号"><Inp value={f.numbered} onChange={set("numbered")} type="number" placeholder="99" /></FF>
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+        <FF label="价格 ¥" required><Inp value={f.price} onChange={set("price")} type="number" placeholder="203" /></FF>
+        <FF label="状态"><Sl value={f.price_condition} onChange={set("price_condition")} options={[["RAW","RAW"],["PSA 10","PSA 10"],["PSA 9","PSA 9"],["PSA 8","PSA 8"],["BGS 9.5","BGS 9.5"]]} /></FF>
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+        <FF label="成交量"><Inp value={f.transaction_count} onChange={set("transaction_count")} type="number" placeholder="32" /></FF>
+        <FF label="来源"><Sl value={f.source} onChange={set("source")} options={[["卡淘","卡淘"],["eBay","eBay"],["其他","其他"]]} /></FF>
+      </div>
+      <button onClick={save} disabled={saving} style={{ width:"100%", padding:"13px", borderRadius:12, border:"none", background:`linear-gradient(135deg,${T.gold},${T.goldDark})`, color:"#000", fontSize:14, fontWeight:700, cursor:"pointer", marginTop:6 }}>{saving?"录入中...":"录入"}</button>
+    </Sheet>
+  );
+}
+
 function TabBar() {
   const {screen,nav}=useApp();
   return <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,display:"flex",justifyContent:"space-around",padding:"10px 0 max(18px, env(safe-area-inset-bottom))",background:"rgba(0,0,0,0.92)",backdropFilter:"blur(30px) saturate(180%)",borderTop:"1px solid rgba(255,255,255,0.08)",zIndex:100}}>
-    {[{id:"home",l:"首页",i:"⬜"},{id:"search",l:"搜索",i:"🔍"},{id:"add"},{id:"pc",l:"PC",i:"❤️"},{id:"invest",l:"投资",i:"📈"},{id:"stats",l:"统计",i:"📊"}].map(tab=>{
+    {[{id:"home",l:"首页",i:"⬜"},{id:"search",l:"搜索",i:"🔍"},{id:"add"},{id:"invest",l:"投资",i:"📈"},{id:"more",l:"更多",i:"☰"}].map(tab=>{
       if(tab.id==="add") return <button key="add" onClick={()=>nav("add")} style={{position:"relative",background:"none",border:"none",padding:0,marginTop:-18}}>
         <div style={{width:56,height:56,borderRadius:"50%",background:T.gold,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,boxShadow:`0 4px 24px rgba(200,168,75,0.5)`}}>📷</div>
       </button>;
-      const active=screen===tab.id||((tab.id==="home")&&["detail","add","edit"].includes(screen));
+      const active=screen===tab.id||((tab.id==="home")&&["detail","add","edit"].includes(screen))||((tab.id==="more")&&["pc","stats","radar","invest_ai"].includes(screen));
       return <button key={tab.id} onClick={()=>nav(tab.id)} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,background:"none",border:"none",padding:"4px 12px",color:active?T.gold:T.dim,transition:"color 0.2s"}}>
         <span style={{fontSize:22}}>{tab.i}</span>
         <span style={{fontFamily:"'Noto Sans SC',sans-serif",fontSize:10,fontWeight:active?700:400}}>{tab.l}</span>
@@ -3366,7 +4023,9 @@ function Router() {
     case "batchImport": return <BatchImportScreen />;
     case "pc":     return <PCScreen />;
     case "stats":  return <StatsScreen />;
-    case "invest": return <InvestmentScreen />;
+    case "invest": return <InvestScreen />;
+    case "more":   return <MoreScreen />;
+    case "invest_ai": return <InvestmentScreen />;
     case "detail": return <DetailScreen />;
     case "radar":  return <RadarScreen />;
     default:       return <HomeScreen />;
