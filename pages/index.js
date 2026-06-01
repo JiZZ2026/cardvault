@@ -863,7 +863,29 @@ function BatchImportScreen() {
       if (!parsed.length) { showToast("文件为空或格式不对","warn"); setLoading(false); return; }
       const res = await apiBatchValidate(parsed);
       if (!res.success) { showToast(res.error||"校验失败","warn"); setLoading(false); return; }
-      setCards(res.data.cards.map((c,i) => ({...c, _idx:i, _keep:true, _forceDup:false})));
+      const mapped = (res.data.items || []).map((it, i) => ({
+        _idx: i, _keep: true, _forceDup: false,
+        status: it.status,
+        existing_id: it.existing_id || null,
+        issues: it.issues || [],
+        player_name: it.card?.player || "",
+        team: it.card?.team || "",
+        year: it.card?.year || "",
+        brand: it.card?.manufacturer || "",
+        set_name: it.card?.series || "",
+        card_number: it.card?.card_number || "",
+        parallel: it.card?.parallel || "",
+        numbered: it.card?.numbered || "",
+        is_rc: !!it.card?.is_rc,
+        is_one_of_one: !!it.card?.is_one_of_one,
+        sub_series: it.card?.sub_series || "",
+        grade: it.card?.grade || "RAW",
+        category: it.card?.category || "PC",
+        purchase_price: it.card?.buy_price != null ? String(it.card.buy_price) : "",
+        purchase_currency: it.card?.price_currency || "RMB",
+        notes: it.card?.notes || "",
+      }));
+      setCards(mapped);
       setStep(2);
     } catch(err) { showToast("文件解析失败: "+err.message,"warn"); }
     setLoading(false);
@@ -876,7 +898,7 @@ function BatchImportScreen() {
   const doImport = async () => {
     setLoading(true);
     const toImport = cards.filter(c => c._keep).map(c => {
-      const {_idx,_keep,_forceDup,status,...rest} = c;
+      const {_idx,_keep,_forceDup,status,existing_id,issues,...rest} = c;
       return rest;
     });
     const skipDups = cards.filter(c => c.status==="duplicate" && !c._forceDup).length > 0;
@@ -1091,6 +1113,309 @@ function DailyCardFull({ card, players }) {
   );
 }
 
+// ── 批量图片录入 ───────────────────────────────────────────────────────────
+let _bpSeq = 0;
+const bpId = () => `bp${++_bpSeq}_${Date.now()%100000}`;
+
+function BPSlot({ image, label, onPick }) {
+  const ref = useRef();
+  const handle = async e => { const f = e.target.files?.[0]; if(!f) return; onPick(await toB64(f)); e.target.value=""; };
+  return <div onClick={()=>ref.current?.click()} style={{width:84,height:116,borderRadius:10,cursor:"pointer",background:image?"#0a0a14":T.s2,border:`2px dashed ${image?T.borderGold:T.border}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden",position:"relative",flexShrink:0}}>
+    <input ref={ref} type="file" accept="image/*" onChange={handle} style={{display:"none"}} />
+    {image
+      ? <><img src={image} alt="" style={{width:"100%",height:"100%",objectFit:"contain"}} /><div style={{position:"absolute",top:4,right:4,padding:"1px 5px",background:"rgba(61,170,106,0.9)",borderRadius:4,fontSize:8,color:"#fff",fontWeight:700}}>✓</div></>
+      : <><div style={{fontSize:22,marginBottom:4}}>📷</div><div style={{fontFamily:"'Space Mono',monospace",fontSize:9,color:T.dim,fontWeight:700}}>{label}</div></>}
+  </div>;
+}
+
+function BPDots({ cur }) {
+  return <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:20}}>{["选图","识别","确认","入库"].map((l,i)=>{
+    const done=i<cur,act=i===cur;
+    return <div key={l} style={{display:"flex",alignItems:"center",gap:6}}>
+      <div style={{width:24,height:24,borderRadius:"50%",background:act?`linear-gradient(135deg,${T.gold},${T.goldDark})`:done?"rgba(61,170,106,0.2)":T.s2,border:`1px solid ${act?T.borderGold:done?"rgba(61,170,106,0.4)":T.border}`,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Space Mono',monospace",fontSize:10,fontWeight:700,color:act?"#000":done?T.green:T.dim}}>{done?"✓":i+1}</div>
+      <span style={{fontSize:11,color:act?T.gold:T.dim}}>{l}</span>
+      {i<3&&<div style={{width:14,height:1,background:T.border}} />}
+    </div>;
+  })}</div>;
+}
+
+function BatchPhotoScreen() {
+  const { nav, showToast, refreshCards, pcP } = useApp();
+  const [step, setStep] = useState(1);
+  const [rows, setRows] = useState(() => [{ _id: bpId(), front: null, back: null }]);
+  const [progress, setProgress] = useState({ current: 0, total: 0 });
+  const [cards, setCards] = useState([]);
+  const [expandedId, setExpandedId] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const addEmptyRow = () => setRows(rs => [...rs, { _id: bpId(), front: null, back: null }]);
+  const removeRow = id => setRows(rs => rs.filter(r => r._id !== id));
+  const setRowImg = (id, side, b64) => setRows(rs => rs.map(r => r._id === id ? { ...r, [side]: b64 } : r));
+  const addFrontsBulk = async e => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    const news = [];
+    for (const f of files) { try { news.push({ _id: bpId(), front: await toB64(f), back: null }); } catch(_) {} }
+    setRows(rs => {
+      const base = (rs.length === 1 && !rs[0].front && !rs[0].back) ? [] : rs;
+      return [...base, ...news];
+    });
+    e.target.value = "";
+  };
+
+  const filledRows = rows.filter(r => r.front || r.back);
+
+  const blankCard = (id, tf, tb, note) => ({
+    _id: id, _recogFailed: true, _keep: true, _forceDup: false, _status: null, _existingId: null, _issues: [],
+    player_name: "", team: "", year: "", brand: "", set_name: "", card_number: "", parallel: "",
+    numbered: "", is_rc: false, is_one_of_one: false, sub_series: "", grade: "RAW", grade_company: "", grade_score: "",
+    category: "investment", purchase_price: "", purchase_currency: "RMB", notes: note || "",
+    image_front: tf, image_back: tb,
+  });
+
+  const recognizeAll = async () => {
+    if (!filledRows.length) { showToast("请先添加至少一张卡的照片", "warn"); return; }
+    setStep(2);
+    setProgress({ current: 0, total: filledRows.length });
+    const out = [];
+    for (let i = 0; i < filledRows.length; i++) {
+      const r = filledRows[i];
+      setProgress({ current: i + 1, total: filledRows.length });
+      let tf = null, tb = null;
+      try {
+        const [cf, cb] = await Promise.all([
+          r.front ? compressImg(r.front, 1400, 0.88) : null,
+          r.back  ? compressImg(r.back, 1400, 0.88)  : null,
+        ]);
+        [tf, tb] = await Promise.all([
+          r.front ? mkThumb(r.front) : null,
+          r.back  ? mkThumb(r.back)  : null,
+        ]);
+        const resp = await apiRecognize(cf, cb);
+        if (resp.success) {
+          const d = resp.data;
+          const isPC = pcP.some(p => p.name === d.player);
+          out.push({
+            _id: r._id, _recogFailed: false, _keep: true, _forceDup: false, _status: null, _existingId: null, _issues: [],
+            player_name: d.player || "", team: d.team || "", year: d.year || "", brand: d.manufacturer || "",
+            set_name: d.series || "", card_number: d.cardNumber || "", parallel: d.parallel || "",
+            numbered: d.numbered || "", is_rc: !!d.isRC, is_one_of_one: !!d.isOneOfOne, sub_series: d.subSeries || "",
+            grade: d.grade || "RAW", grade_company: d.gradeCompany || "", grade_score: d.gradeScore || "",
+            category: isPC ? "PC" : "investment", purchase_price: "", purchase_currency: "RMB", notes: "",
+            image_front: tf, image_back: tb,
+          });
+        } else {
+          out.push(blankCard(r._id, tf, tb, resp.error ? `识别失败：${resp.error}` : "识别失败，请手动填写"));
+        }
+      } catch (err) {
+        out.push(blankCard(r._id, tf, tb, "识别异常，请手动填写"));
+      }
+    }
+    try {
+      const forVal = out.map(c => {
+        const { image_front, image_back, _id, _recogFailed, _keep, _forceDup, _status, _existingId, _issues, ...rest } = c;
+        return rest;
+      });
+      const vr = await apiBatchValidate(forVal);
+      if (vr.success && vr.data && Array.isArray(vr.data.items)) {
+        vr.data.items.forEach(it => {
+          const c = out[it.index];
+          if (!c) return;
+          c._status = it.status;
+          c._existingId = it.existing_id || null;
+          c._issues = it.issues || [];
+        });
+      }
+    } catch (err) { console.error("批量校验失败:", err); }
+    out.forEach(c => { if (!c._status) c._status = (c.player_name && c.year && c.set_name) ? "ready" : "error"; });
+    setCards(out);
+    setStep(3);
+  };
+
+  const updCardField = (id, field, value) => setCards(cs => cs.map(c => c._id === id ? { ...c, [field]: value } : c));
+  const removeCard = id => setCards(cs => cs.filter(c => c._id !== id));
+  const toggleForce = id => setCards(cs => cs.map(c => c._id === id ? { ...c, _forceDup: !c._forceDup } : c));
+
+  const doImport = async () => {
+    const ready  = cards.filter(c => c._keep && c._status === "ready");
+    const forced = cards.filter(c => c._keep && c._status === "duplicate" && c._forceDup);
+    const skippedDup = cards.filter(c => c._keep && c._status === "duplicate" && !c._forceDup).length;
+    const errored = cards.filter(c => c._keep && c._status === "error").length;
+    const toImport = [...ready, ...forced];
+    if (!toImport.length) { showToast("没有可入库的卡片（缺必填信息或全部跳过）", "warn"); return; }
+    setImporting(true);
+    const payload = toImport.map(c => {
+      const tags = buildTags({ tags: [], numbered: c.numbered, is_rc: c.is_rc, is_one_of_one: c.is_one_of_one, category: c.category });
+      return {
+        player_name: c.player_name, team: c.team, year: c.year, brand: c.brand, set_name: c.set_name,
+        card_number: c.card_number, parallel: c.parallel, numbered: c.numbered || null,
+        is_rc: c.is_rc, is_one_of_one: c.is_one_of_one, sub_series: c.sub_series,
+        grade: c.grade, grade_company: c.grade_company || null, grade_score: c.grade_score || null,
+        category: c.category, status: "holding",
+        purchase_price: c.purchase_price !== "" ? c.purchase_price : null,
+        purchase_currency: c.purchase_currency || "RMB",
+        purchase_date: new Date().toISOString().slice(0, 10),
+        source: "batch_photo", notes: c.notes || "", tags,
+        image_front: c.image_front, image_back: c.image_back,
+      };
+    });
+    const res = await apiBatchImport(payload, false);
+    setImporting(false);
+    if (res.success) {
+      setResult({ imported: res.data.imported || 0, failed: res.data.failed || 0, skippedDup, errored });
+      setStep(4);
+      refreshCards();
+    } else {
+      showToast(res.error || "导入失败", "warn");
+    }
+  };
+
+  const summary = useMemo(() => ({
+    ready: cards.filter(c => c._status === "ready").length,
+    dup:   cards.filter(c => c._status === "duplicate").length,
+    err:   cards.filter(c => c._status === "error").length,
+  }), [cards]);
+
+  // Step 1: 选图配对
+  if (step === 1) return <div style={{paddingBottom:90}}>
+    <div style={{padding:"16px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,background:T.bg,zIndex:10,borderBottom:`1px solid ${T.border}`}}>
+      <button onClick={()=>nav("home")} style={{background:"none",border:"none",color:T.muted,fontSize:20,cursor:"pointer"}}>←</button>
+      <span style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.dim,letterSpacing:1}}>批量录入</span>
+      <div style={{width:24}} />
+    </div>
+    <div style={{padding:"20px 20px"}}>
+      <BPDots cur={0} />
+      <div style={{fontFamily:"'Inter',sans-serif",fontSize:18,color:T.text,marginBottom:6}}>添加多张卡片</div>
+      <p style={{fontSize:12,color:T.muted,lineHeight:1.7,marginBottom:16}}>每张卡放正反两面，AI 逐张识别。可先用「批量添加正面」一次导入多张，再逐行补背面。</p>
+      <div style={{display:"flex",gap:8,marginBottom:16}}>
+        <label style={{flex:1,textAlign:"center",padding:"11px",borderRadius:12,background:T.s2,border:`1px solid ${T.borderGold}`,color:T.gold,fontSize:13,fontWeight:600,cursor:"pointer"}}>
+          📷 批量添加正面
+          <input type="file" accept="image/*" multiple onChange={addFrontsBulk} style={{display:"none"}} />
+        </label>
+        <button onClick={addEmptyRow} style={{flex:1,padding:"11px",borderRadius:12,background:"transparent",border:`1px solid ${T.border}`,color:T.muted,fontSize:13,cursor:"pointer"}}>➕ 空白卡片</button>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
+        {rows.map((r,i)=>(
+          <div key={r._id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px",borderRadius:12,background:T.s2,border:`1px solid ${T.border}`}}>
+            <span style={{fontFamily:"'Space Mono',monospace",fontSize:12,color:T.dim,minWidth:20}}>{i+1}</span>
+            <BPSlot image={r.front} label="正面" onPick={b=>setRowImg(r._id,"front",b)} />
+            <BPSlot image={r.back} label="背面" onPick={b=>setRowImg(r._id,"back",b)} />
+            <button onClick={()=>removeRow(r._id)} style={{marginLeft:"auto",background:"none",border:"none",color:T.red,fontSize:16,cursor:"pointer",padding:"4px 8px"}}>✕</button>
+          </div>
+        ))}
+        {rows.length===0 && <div style={{textAlign:"center",padding:"32px 0",color:T.dim,fontSize:13}}>还没有卡片，点上面按钮添加</div>}
+      </div>
+      <button onClick={recognizeAll} disabled={!filledRows.length} style={{width:"100%",padding:"14px",borderRadius:14,border:"none",background:filledRows.length?`linear-gradient(135deg,${T.gold},${T.goldDark})`:T.s3,color:filledRows.length?"#000":T.dim,fontSize:15,fontWeight:700,boxShadow:filledRows.length?`0 4px 20px rgba(201,168,76,0.25)`:"none",cursor:filledRows.length?"pointer":"default"}}>
+        {filledRows.length?`🧠 开始识别（${filledRows.length} 张）`:"请先添加照片"}
+      </button>
+    </div>
+  </div>;
+
+  // Step 2: 识别中
+  if (step === 2) return <div style={{paddingBottom:90}}>
+    <div style={{padding:"16px 20px",borderBottom:`1px solid ${T.border}`}}><span style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.dim,letterSpacing:1}}>AI识别中...</span></div>
+    <div style={{padding:"24px 20px"}}>
+      <BPDots cur={1} />
+      <div style={{padding:"40px 0",textAlign:"center"}}>
+        <div style={{display:"flex",justifyContent:"center",gap:6,marginBottom:16}}>
+          {[0,1,2].map(i=><span key={i} style={{width:10,height:10,borderRadius:"50%",background:T.gold,display:"inline-block",animation:`pulse 0.8s ease ${i*150}ms infinite`}} />)}
+        </div>
+        <div style={{fontFamily:"'Inter',sans-serif",fontSize:16,color:T.text,marginBottom:8}}>正在识别第 {progress.current} / {progress.total} 张</div>
+        <p style={{fontSize:12,color:T.dim}}>逐张识别，请勿离开此页</p>
+        <div style={{marginTop:20,height:6,borderRadius:3,background:T.s2,overflow:"hidden"}}>
+          <div style={{height:"100%",width:`${progress.total?Math.round(progress.current/progress.total*100):0}%`,background:`linear-gradient(90deg,${T.gold},${T.goldDark})`,transition:"width 0.3s"}} />
+        </div>
+      </div>
+    </div>
+  </div>;
+
+  // Step 3: 预览确认
+  if (step === 3) return <div style={{paddingBottom:90}}>
+    <div style={{padding:"16px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,background:T.bg,zIndex:10,borderBottom:`1px solid ${T.border}`}}>
+      <button onClick={()=>setStep(1)} style={{background:"none",border:"none",color:T.muted,fontSize:20,cursor:"pointer"}}>←</button>
+      <span style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.dim}}>预览确认</span>
+      <button onClick={doImport} disabled={importing||!cards.length} style={{padding:"7px 16px",borderRadius:8,border:"none",background:cards.length?`linear-gradient(135deg,${T.gold},${T.goldDark})`:T.border,color:cards.length?"#000":T.dim,fontSize:12,fontWeight:700,cursor:cards.length?"pointer":"default"}}>{importing?"导入中...":"确认入库"}</button>
+    </div>
+    <div style={{padding:"12px 20px",display:"flex",gap:12,borderBottom:`1px solid ${T.border}`}}>
+      <span style={{fontSize:12,color:T.green}}>✅ {summary.ready} 就绪</span>
+      <span style={{fontSize:12,color:T.orange}}>⚠️ {summary.dup} 疑似重复</span>
+      <span style={{fontSize:12,color:T.red}}>🔴 {summary.err} 缺信息</span>
+    </div>
+    <div style={{padding:"12px 20px"}}>
+      {cards.map((c,i)=>{
+        const bgColor = c._status==="duplicate"?"rgba(224,160,48,0.06)":c._status==="error"?"rgba(212,80,80,0.06)":"transparent";
+        const borderColor = c._status==="duplicate"?T.orange:c._status==="error"?T.red:T.border;
+        const icon = c._status==="ready"?"🟢":c._status==="duplicate"?"🟡":"🔴";
+        const expanded = expandedId===c._id;
+        return <div key={c._id} style={{marginBottom:8,borderRadius:12,border:`1px solid ${borderColor}`,background:bgColor,overflow:"hidden"}}>
+          <div onClick={()=>setExpandedId(expanded?null:c._id)} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 12px",cursor:"pointer"}}>
+            <span style={{fontSize:12,color:T.dim,fontFamily:"'Space Mono',monospace",minWidth:20}}>{i+1}</span>
+            {c.image_front
+              ? <img src={c.image_front} alt="" style={{width:30,height:42,objectFit:"contain",borderRadius:4,background:"#0a0a14",flexShrink:0}} />
+              : <div style={{width:30,height:42,borderRadius:4,background:T.s3,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,flexShrink:0}}>🃏</div>}
+            <span style={{fontSize:12}}>{icon}</span>
+            <span style={{fontSize:13,fontWeight:600,color:T.text,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.player_name||"（未识别）"}</span>
+            <span style={{fontSize:11,color:T.muted,maxWidth:100,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.year||""} {c.set_name||""} {c.parallel||""}</span>
+            <button onClick={(e)=>{e.stopPropagation();removeCard(c._id);}} style={{background:"none",border:"none",color:T.red,fontSize:14,cursor:"pointer",padding:"2px 6px"}}>✕</button>
+          </div>
+          {c._status==="duplicate" && !expanded && (
+            <div style={{padding:"4px 12px 8px 50px"}}>
+              <button onClick={(e)=>{e.stopPropagation();toggleForce(c._id);}} style={{fontSize:11,padding:"4px 10px",borderRadius:6,border:`1px solid ${c._forceDup?T.gold:T.border}`,background:c._forceDup?"rgba(201,168,76,0.1)":"transparent",color:c._forceDup?T.gold:T.muted,cursor:"pointer"}}>{c._forceDup?"仍然导入 ✓":"仍然导入"}</button>
+            </div>
+          )}
+          {expanded && (
+            <div style={{padding:"8px 12px 12px",borderTop:`1px solid ${T.border}`}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                {[["player_name","球员名"],["year","赛季"],["brand","品牌"],["set_name","系列"],["card_number","卡号"],["parallel","平行"],["numbered","限量"],["sub_series","子系列"],["purchase_price","购入价"],["purchase_currency","币种"]].map(([k,l])=>(
+                  <div key={k}>
+                    <div style={{fontFamily:"'Space Mono',monospace",fontSize:9,color:T.dim,marginBottom:3}}>{l}</div>
+                    <input value={c[k]||""} onChange={e=>updCardField(c._id,k,e.target.value)} style={{width:"100%",padding:"6px 8px",border:`1px solid ${T.border}`,borderRadius:6,background:T.s3,color:T.text,fontSize:12,outline:"none",boxSizing:"border-box"}} onFocus={e=>e.target.style.borderColor=T.gold} onBlur={e=>e.target.style.borderColor=T.border} />
+                  </div>
+                ))}
+              </div>
+              <div style={{display:"flex",gap:8,marginTop:10,alignItems:"center"}}>
+                <button onClick={()=>updCardField(c._id,"is_rc",!c.is_rc)} style={{fontSize:11,padding:"5px 12px",borderRadius:6,border:`1px solid ${c.is_rc?T.green:T.border}`,background:c.is_rc?"rgba(61,170,106,0.1)":"transparent",color:c.is_rc?T.green:T.muted,cursor:"pointer"}}>{c.is_rc?"RC ✓":"RC"}</button>
+                <button onClick={()=>updCardField(c._id,"is_one_of_one",!c.is_one_of_one)} style={{fontSize:11,padding:"5px 12px",borderRadius:6,border:`1px solid ${c.is_one_of_one?T.gold:T.border}`,background:c.is_one_of_one?"rgba(201,168,76,0.1)":"transparent",color:c.is_one_of_one?T.gold:T.muted,cursor:"pointer"}}>{c.is_one_of_one?"1/1 ✓":"1/1"}</button>
+                <select value={c.category} onChange={e=>updCardField(c._id,"category",e.target.value)} style={{fontSize:11,padding:"5px 8px",borderRadius:6,border:`1px solid ${T.border}`,background:T.s3,color:T.text,cursor:"pointer",outline:"none"}}>
+                  <option value="investment">投资</option>
+                  <option value="PC">PC</option>
+                </select>
+              </div>
+              {c._status==="duplicate" && (
+                <button onClick={()=>toggleForce(c._id)} style={{marginTop:10,fontSize:11,padding:"6px 12px",borderRadius:6,border:`1px solid ${c._forceDup?T.gold:T.border}`,background:c._forceDup?"rgba(201,168,76,0.1)":"transparent",color:c._forceDup?T.gold:T.muted,cursor:"pointer"}}>{c._forceDup?"仍然导入 ✓":"仍然导入（忽略重复）"}</button>
+              )}
+              {c._status==="error" && <div style={{marginTop:8,fontSize:11,color:T.red}}>⚠️ 缺少必填信息（球员名 / 赛季 / 系列），补全后才会入库</div>}
+            </div>
+          )}
+        </div>;
+      })}
+      {cards.length===0 && <div style={{textAlign:"center",padding:"40px 0",color:T.dim,fontSize:13}}>没有可导入的卡片</div>}
+    </div>
+  </div>;
+
+  // Step 4: 结果
+  return <div style={{paddingBottom:90}}>
+    <div style={{padding:"16px 20px",display:"flex",justifyContent:"center",alignItems:"center",position:"sticky",top:0,background:T.bg,zIndex:10,borderBottom:`1px solid ${T.border}`}}>
+      <span style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:T.dim}}>入库完成</span>
+    </div>
+    <div style={{padding:"44px 20px",textAlign:"center"}}>
+      <div style={{fontSize:48,marginBottom:16}}>✅</div>
+      <h2 style={{fontSize:18,fontWeight:700,color:T.text,marginBottom:24}}>批量入库完成</h2>
+      <div style={{display:"flex",justifyContent:"center",flexWrap:"wrap",gap:18,marginBottom:32}}>
+        <div style={{textAlign:"center"}}><div style={{fontSize:24,fontWeight:700,color:T.green,fontFamily:"'Space Mono',monospace"}}>{result?.imported||0}</div><div style={{fontSize:11,color:T.muted,marginTop:4}}>成功入库</div></div>
+        <div style={{textAlign:"center"}}><div style={{fontSize:24,fontWeight:700,color:T.orange,fontFamily:"'Space Mono',monospace"}}>{result?.skippedDup||0}</div><div style={{fontSize:11,color:T.muted,marginTop:4}}>跳过重复</div></div>
+        <div style={{textAlign:"center"}}><div style={{fontSize:24,fontWeight:700,color:T.dim,fontFamily:"'Space Mono',monospace"}}>{result?.errored||0}</div><div style={{fontSize:11,color:T.muted,marginTop:4}}>缺信息</div></div>
+        <div style={{textAlign:"center"}}><div style={{fontSize:24,fontWeight:700,color:T.red,fontFamily:"'Space Mono',monospace"}}>{result?.failed||0}</div><div style={{fontSize:11,color:T.muted,marginTop:4}}>失败</div></div>
+      </div>
+      <div style={{display:"flex",gap:10,justifyContent:"center"}}>
+        <button onClick={()=>nav("home")} style={{padding:"14px 28px",borderRadius:14,border:"none",background:`linear-gradient(135deg,${T.gold},${T.goldDark})`,color:"#000",fontSize:15,fontWeight:700,cursor:"pointer",boxShadow:`0 4px 20px rgba(201,168,76,0.25)`}}>返回首页</button>
+        <button onClick={()=>{setRows([{_id:bpId(),front:null,back:null}]);setCards([]);setResult(null);setExpandedId(null);setStep(1);}} style={{padding:"14px 28px",borderRadius:14,border:`1px solid ${T.border}`,background:"transparent",color:T.muted,fontSize:15,cursor:"pointer"}}>再录一批</button>
+      </div>
+    </div>
+  </div>;
+}
+
 function HomeScreen() {
   const {cards,pcP,stats,loading,daily,nav,refreshDaily,dc,toggleDC,rate}=useApp();
   const [investments, setInvestments] = useState([]);
@@ -1140,7 +1465,8 @@ function HomeScreen() {
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
           <CurrBtn />
-          <button onClick={()=>nav("batchImport")} style={{width:38,height:38,borderRadius:"50%",border:"none",background:T.s2,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,cursor:"pointer",flexShrink:0}}>📦</button>
+          <button onClick={()=>nav("batchImport")} title="批量导入（JSON/CSV）" style={{width:38,height:38,borderRadius:"50%",border:"none",background:T.s2,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,cursor:"pointer",flexShrink:0}}>📦</button>
+          <button onClick={()=>nav("batchPhoto")} title="批量拍照录入" style={{width:38,height:38,borderRadius:"50%",border:"none",background:T.s2,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,cursor:"pointer",flexShrink:0}}>📸</button>
           <button onClick={()=>nav("search")} style={{width:38,height:38,borderRadius:"50%",border:"none",background:T.s2,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,cursor:"pointer",flexShrink:0}}>🔍</button>
           <button onClick={()=>nav("add")} style={{width:38,height:38,borderRadius:"50%",border:"none",background:T.gold,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,cursor:"pointer",flexShrink:0}}>📷</button>
         </div>
@@ -4021,6 +4347,7 @@ function Router() {
     case "add":    return <AddScreen />;
     case "edit":   return <EditScreen />;
     case "batchImport": return <BatchImportScreen />;
+    case "batchPhoto": return <BatchPhotoScreen />;
     case "pc":     return <PCScreen />;
     case "stats":  return <StatsScreen />;
     case "invest": return <InvestScreen />;
