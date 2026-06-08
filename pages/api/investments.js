@@ -5,6 +5,21 @@
 // DELETE /api/investments?id=xxx      软删除（status -> closed）
 
 import { supabase } from "../../lib/supabase";
+import { buildInvestmentWatchItemRow } from "./radar-scan";
+
+async function syncInvestmentWatchItem(inv) {
+  const row = buildInvestmentWatchItemRow(inv);
+  if (!row) return;
+  // 幂等：同 description 已存在则跳过
+  const { data: existing } = await supabase
+    .from("watch_items")
+    .select("id")
+    .eq("source", "investment")
+    .eq("description", row.description)
+    .limit(1);
+  if (existing?.length) return;
+  await supabase.from("watch_items").insert([row]);
+}
 
 export const config = {
   api: { bodyParser: { sizeLimit: "4mb" } },
@@ -97,6 +112,11 @@ export default async function handler(req, res) {
       .select()
       .single();
     if (error) return res.status(500).json({ error: error.message });
+
+    // 同步建一条 watch_item，让雷达扫描立刻能扫到（失败不阻塞创建）
+    try { await syncInvestmentWatchItem(data); }
+    catch (e) { console.error("syncInvestmentWatchItem failed:", e.message); }
+
     return res.status(201).json(data);
   }
 

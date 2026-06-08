@@ -155,24 +155,17 @@ export default async function handler(req, res) {
     }
 
     // ── 在售扫描 ──────────────────────────────────────────────────────────────
-    let watchItems = await getActiveWatchItems(goal_id || null);
-
-    if (watchItems.length === 0 && !goal_id) {
-      const rebuilt = await rebuildWatchItems();
-      const investRebuilt = await rebuildInvestmentWatchItems();
-      if (rebuilt === 0 && investRebuilt === 0) {
-        return res.status(200).json({
-          success: false, scanned: 0, found: 0,
-          message: '没有收集目标或投资追踪，请先创建',
-        });
-      }
-      watchItems = await getActiveWatchItems(null);
+    // 全量扫描前先幂等补齐 watch_items（按目标/投资逐条检查，已有则跳过）
+    if (!goal_id) {
+      await rebuildWatchItems();
+      await rebuildInvestmentWatchItems();
     }
+    let watchItems = await getActiveWatchItems(goal_id || null);
 
     if (watchItems.length === 0) {
       return res.status(200).json({
         success: false, scanned: 0, found: 0,
-        message: goal_id ? '该目标暂无监控条目，请先同步' : '监控条目重建失败，请重新同步目标',
+        message: goal_id ? '该目标暂无监控条目，请先同步' : '没有收集目标或投资追踪，请先创建',
       });
     }
 
@@ -311,6 +304,35 @@ async function rebuildWatchItems() {
   return total;
 }
 
+export function buildInvestmentKeywords(inv) {
+  const playerCn = inv.player_name_cn || '';
+  const playerEn = inv.player_name || '';
+  const meta = inv.player_meta || {};
+  const yearShort = meta.year_short || '';
+  const brand = (meta.brand || 'prizm').toLowerCase();
+  const playerLast = playerEn.split(' ').pop() || '';
+  // 卡淘用中文，缺中文则 fallback 到英文姓氏
+  const kataoPlayer = playerCn || playerLast;
+  const kataoKw = [kataoPlayer, yearShort, brand].filter(Boolean).join(' ').trim();
+  const ebayKw = [playerLast, yearShort, brand].filter(Boolean).join(' ').trim();
+  return { kataoKw, ebayKw };
+}
+
+export function buildInvestmentWatchItemRow(inv) {
+  const { kataoKw, ebayKw } = buildInvestmentKeywords(inv);
+  if (!kataoKw) return null;
+  return {
+    source: 'investment',
+    goal_id: null,
+    description: `INV: ${inv.player_name_cn || inv.player_name}`,
+    search_keywords_ebay: ebayKw,
+    search_keywords_katao: kataoKw,
+    tier: 'must_watch',
+    status: 'active',
+    meta: { investment_id: inv.id, player_name: inv.player_name, exit_rules: inv.exit_rules },
+  };
+}
+
 async function rebuildInvestmentWatchItems() {
   const { data: investments } = await supabase
     .from('player_investments')
@@ -325,27 +347,10 @@ async function rebuildInvestmentWatchItems() {
       .select('id').eq('source', 'investment').eq('description', `INV: ${inv.player_name_cn || inv.player_name}`).limit(1);
     if (existing?.length) continue;
 
-    const playerCn = inv.player_name_cn || '';
-    const playerEn = inv.player_name || '';
-    const meta = inv.player_meta || {};
-    const yearShort = meta.year_short || '';
-    const brand = meta.brand || 'prizm';
+    const row = buildInvestmentWatchItemRow(inv);
+    if (!row) continue;
 
-    const kataoKw = [playerCn, yearShort, brand.toLowerCase()].filter(Boolean).join(' ').trim();
-    if (!kataoKw) continue;
-
-    const ebayKw = [playerEn.split(' ').pop(), yearShort, brand].filter(Boolean).join(' ');
-
-    const { error } = await supabase.from('watch_items').insert([{
-      source: 'investment',
-      goal_id: null,
-      description: `INV: ${inv.player_name_cn || inv.player_name}`,
-      search_keywords_ebay: ebayKw,
-      search_keywords_katao: kataoKw,
-      tier: 'must_watch',
-      status: 'active',
-      meta: { investment_id: inv.id, player_name: inv.player_name, exit_rules: inv.exit_rules },
-    }]);
+    const { error } = await supabase.from('watch_items').insert([row]);
     if (!error) total++;
   }
   return total;
