@@ -182,6 +182,15 @@ export default async function handler(req, res) {
   if (req.method === 'DELETE') {
     const { id } = req.query;
     if (!id) return res.status(400).json({ error: '缺少 id' });
+
+    // 级联清理：scan_results → watch_items → goal（防御性，FK 即使无 CASCADE 也不报错）
+    const { data: wis } = await supabase.from('watch_items').select('id').eq('goal_id', id);
+    const wiIds = (wis || []).map(w => w.id);
+    if (wiIds.length) {
+      await supabase.from('scan_results').delete().in('watch_item_id', wiIds);
+      await supabase.from('watch_items').delete().eq('goal_id', id);
+    }
+
     const { error } = await supabase.from('collection_goals').delete().eq('id', id);
     if (error) return res.status(500).json({ error: error.message });
     return res.status(200).json({ success: true });
