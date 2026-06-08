@@ -180,18 +180,25 @@ Harvest 完整日志:`/tmp/katao_calib/harvest.log`;汇总 JSON:`/tmp/katao_cali
 
 ## 7. 早上要做的(按顺序)
 
-1. ✅ **Review 6 个 commit**:
+> 分支 `katao-keyword-calibration` **只在本地**,没 push 到 GitHub(避免 Vercel 起 preview 部署 — brief 说不部署)。
+
+1. ✅ **Review 本分支 2 个 commit**:
    ```
-   <列出 commit hash 和 message>
+   git checkout katao-keyword-calibration
+   git log --oneline main..HEAD
+   # 435ad73 chore: 校准/采集脚本 + 迁移 SQL + 晨报
+   # a0a54f3 refactor: 抽 lib/katao-keywords.js 统一卡淘关键词生成 + 实证去年份默认
+   git diff main..HEAD                # 完整 diff
    ```
-2. ✅ **Merge 分支到 main**:
+2. ✅ **Merge 分支到 main + push**(Vercel 自动部署):
    ```
-   git checkout main && git merge --ff-only katao-keyword-calibration && git push
+   git checkout main
+   git merge --ff-only katao-keyword-calibration
+   git push origin main
    ```
-   (Vercel 自动部署)
 3. ✅ **跑 SQL 迁移**:Supabase Dashboard → SQL Editor → 粘贴 `supabase/migrations/20260609024106_scan_results_listing_status.sql` 内容 → Run
-4. ⚠️ **(可选)给 6 个 investment 在 player_meta 补字段**:目前都是 `{}`,让生成逻辑更精准
-5. ⚠️ **(可选)重跑一次 harvest**(node 跑):`node scripts/katao-harvest.mjs` — 这次 listing_status 已存在,成交也会写入
+4. ⚠️ **(可选)给 6 个 investment 在 player_meta 补字段**:目前都是 `{}`,补 `{ year_short, brand }` 让生成逻辑更精准。但即使不补也没问题——alias 表已经处理了卡淘搜索质量。
+5. ⚠️ **(可选)重跑一次 harvest**(node 跑):`node scripts/katao-harvest.mjs` — SQL 迁移后 listing_status 列已存在,这次成交也会写入,Risacher 5886 / 米勒 10287 / 文班亚马 29347 那些可观成交数据就能落库
 
 ## 8. 没做 / 跳过的事
 
