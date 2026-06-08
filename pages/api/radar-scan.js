@@ -3,6 +3,7 @@
 
 import { supabase } from '../../lib/supabase';
 import { searchKatao } from './katao-search';
+import { buildKataoKeyword, resolveKataoPlayerName } from '../../lib/katao-keywords';
 
 const AUTO_KEYWORDS = ['autograph', ' auto ', 'auto/', '签字', '签名', 'inscription'];
 function isAutoCard(title) {
@@ -265,7 +266,8 @@ async function rebuildWatchItems() {
     if (goal.mode === 'full_players') continue;
 
     const cl = goal.checklist || {};
-    const playerCn = goal.player_name_cn || (goal.player_name || '').split(' ').pop() || '';
+    const playerCn = goal.player_name_cn || '';
+    const playerEn = goal.player_name || '';
     const setName = cl.set_name || '';
     const yearParts = (cl.set_year || '').split('-');
     const yearShort = yearParts.length >= 2
@@ -281,8 +283,11 @@ async function rebuildWatchItems() {
     const fc = goal.filter_condition || {};
     const numStr = fc.max_print_run ? ('/' + fc.max_print_run) : '';
 
-    const kataoKw = [playerCn, yearShort, seriesCn, numStr].filter(Boolean).join(' ').trim();
-    const ebayKw = [(goal.player_name || '').split(' ').pop(), yearStart, seriesEn, numStr].filter(Boolean).join(' ');
+    // 走 alias 表 + "·"回退。
+    // 实证:卡淘标题大多不写年份,带 year_short 反而显著减少命中,所以默认不带。
+    const kataoKw = buildKataoKeyword({ playerCn, playerEn, yearShort: '', brand: seriesCn, numStr });
+    const ebayLast = playerEn.split(' ').pop();
+    const ebayKw = [ebayLast, yearStart, seriesEn, numStr].filter(Boolean).join(' ');
 
     if (!kataoKw) continue;
 
@@ -311,9 +316,9 @@ export function buildInvestmentKeywords(inv) {
   const yearShort = meta.year_short || '';
   const brand = (meta.brand || 'prizm').toLowerCase();
   const playerLast = playerEn.split(' ').pop() || '';
-  // 卡淘用中文，缺中文则 fallback 到英文姓氏
-  const kataoPlayer = playerCn || playerLast;
-  const kataoKw = [kataoPlayer, yearShort, brand].filter(Boolean).join(' ').trim();
+  // 卡淘：走 alias 表 + "·"回退；实证发现卡淘标题大多不带年份,
+  // 默认不强加 year_short（meta.year_short 提供时才带），加了反而少匹配。
+  const kataoKw = buildKataoKeyword({ playerCn, playerEn, yearShort, brand });
   const ebayKw = [playerLast, yearShort, brand].filter(Boolean).join(' ').trim();
   return { kataoKw, ebayKw };
 }

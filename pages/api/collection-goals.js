@@ -2,6 +2,7 @@
 
 import { supabase } from '../../lib/supabase';
 import Anthropic from '@anthropic-ai/sdk';
+import { buildKataoKeyword } from '../../lib/katao-keywords';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -176,6 +177,22 @@ export default async function handler(req, res) {
     const { data, error } = await supabase.from('collection_goals')
       .update({ ...req.body, updated_at: new Date().toISOString() }).eq('id', id).select().single();
     if (error) return res.status(500).json({ error: error.message });
+
+    // 关键字段改动 → 重建关联 watch_item 的 katao/ebay 关键词
+    // (与 investments PUT 同样的漏：改名/改清单后,雷达扫的还是旧 kw)
+    try {
+      const playerFieldsChanged =
+        'player_name' in req.body || 'player_name_cn' in req.body ||
+        'filter_condition' in req.body || 'checklist_id' in req.body;
+      if (playerFieldsChanged) {
+        const { data: cl } = data.checklist_id
+          ? await supabase.from('checklists').select('*').eq('id', data.checklist_id).maybeSingle()
+          : { data: null };
+        // generateWatchItems 内部已对同 goal_id 做 delete+insert,保证幂等
+        await generateWatchItems(data.id, data, data.missing_items || [], cl);
+      }
+    } catch (e) { console.error('goals PUT watch_item rebuild failed:', e.message); }
+
     return res.status(200).json(data);
   }
 
@@ -257,7 +274,8 @@ async function generateWatchItems(goalId, goal, missingItems, checklist) {
 
   const cl = checklist || {};
   const playerLast = (goal.player_name || '').split(' ').pop() || '';
-  const playerCn = goal.player_name_cn || playerLast;
+  const playerCn = goal.player_name_cn || '';
+  const playerEn = goal.player_name || '';
 
   const setYear = cl.set_year || '';
   const yearShort = setYear.replace(/^20(\d{2})-(\d{2,4}).*$/, '$1-$2');
@@ -276,10 +294,13 @@ async function generateWatchItems(goalId, goal, missingItems, checklist) {
   const fc = goal.filter_condition || {};
   const numStr = fc.max_print_run ? ('/' + fc.max_print_run) : '';
 
-  // 一个目标 = 一条 watch_item，最宽泛关键词
-  // 有编号：加内特 25-26 chrome /50
-  // 无编号：加内特 25-26 chrome
-  const kataoKw = [playerCn, yearShort, seriesCn, numStr].filter(Boolean).join(' ').trim();
+  // 走 alias 表 + "·"回退。
+  // 实证校准发现:卡淘标题大多不写年份,带 year_short 反而显著减少命中
+  //   (例:加内特 chrome /50 成交 88;加内特 25-26 chrome /50 成交只剩 2)
+  // 所以 katao 关键词默认**不**带 year;eBay 一侧仍带,与 eBay 卖家习惯一致。
+  // 有编号：加内特 chrome /50
+  // 无编号：加内特 chrome
+  const kataoKw = buildKataoKeyword({ playerCn, playerEn, yearShort: '', brand: seriesCn, numStr });
   const ebayKw = [playerLast, yearStart, seriesEn, numStr].filter(Boolean).join(' ');
 
   if (!kataoKw) return;
