@@ -27,26 +27,39 @@ export async function searchKatao(keyword, sold = false) {
     + '&sort=EffectiveTimeStamp'
     + '&sortType=desc';           // 最新优先
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
-
+  // 3 次指数退避（800ms / 1.6s / 3.2s），瞬时网络抖动不阻塞调用方
   let data;
-  try {
-    const resp = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Accept-Language': 'zh-CN,zh;q=0.9',
-        'Referer': 'https://www.cardhobby.com.cn/',
-      },
-    });
-    data = await resp.json();
-  } catch (e) {
-    if (e.name === 'AbortError') throw new Error('卡淘请求超时（10秒）');
-    throw new Error('卡淘网络错误: ' + e.message);
-  } finally {
-    clearTimeout(timeout);
+  let lastErr;
+  let backoff = 800;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    try {
+      const resp = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json, text/plain, */*',
+          'Accept-Language': 'zh-CN,zh;q=0.9',
+          'Referer': 'https://www.cardhobby.com.cn/',
+        },
+      });
+      data = await resp.json();
+      lastErr = null;
+      break;  // 成功则退出重试
+    } catch (e) {
+      lastErr = e;
+      if (attempt < 3) {
+        await new Promise(r => setTimeout(r, backoff));
+        backoff *= 2;
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  if (lastErr) {
+    if (lastErr.name === 'AbortError') throw new Error('卡淘请求超时（10秒×3 重试）');
+    throw new Error('卡淘网络错误（3 次重试均失败）: ' + lastErr.message);
   }
 
   if (!data || data.result !== 1) {
