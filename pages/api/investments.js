@@ -7,18 +7,36 @@
 import { supabase } from "../../lib/supabase";
 import { buildInvestmentWatchItemRow } from "./radar-scan";
 
+// upsert：按 meta->>investment_id 定位（改名也能找到），不存在则 insert
 async function syncInvestmentWatchItem(inv) {
   const row = buildInvestmentWatchItemRow(inv);
   if (!row) return;
-  // 幂等：同 description 已存在则跳过
   const { data: existing } = await supabase
     .from("watch_items")
     .select("id")
     .eq("source", "investment")
-    .eq("description", row.description)
+    .eq("meta->>investment_id", inv.id)
     .limit(1);
-  if (existing?.length) return;
-  await supabase.from("watch_items").insert([row]);
+  if (existing?.length) {
+    await supabase.from("watch_items").update({
+      description: row.description,
+      search_keywords_ebay: row.search_keywords_ebay,
+      search_keywords_katao: row.search_keywords_katao,
+      meta: row.meta,
+      status: "active",  // 重激活（防 DELETE 后再 PUT/POST 同 id）
+      updated_at: new Date().toISOString(),
+    }).eq("id", existing[0].id);
+  } else {
+    await supabase.from("watch_items").insert([row]);
+  }
+}
+
+// DELETE 时归档对应 watch_item（status='inactive'，雷达不再扫）
+async function archiveInvestmentWatchItem(invId) {
+  await supabase.from("watch_items")
+    .update({ status: "inactive", updated_at: new Date().toISOString() })
+    .eq("source", "investment")
+    .eq("meta->>investment_id", invId);
 }
 
 export const config = {
@@ -158,6 +176,16 @@ export default async function handler(req, res) {
       .select()
       .single();
     if (error) return res.status(500).json({ error: error.message });
+
+    // 关键字段改动 → 同步重建 watch_item kw；改为 closed → 归档
+    try {
+      if (data.status === "closed") {
+        await archiveInvestmentWatchItem(id);
+      } else if ("player_name" in b || "player_name_cn" in b || "player_meta" in b) {
+        await syncInvestmentWatchItem(data);
+      }
+    } catch (e) { console.error("investments PUT watch_item sync failed:", e.message); }
+
     return res.json(data);
   }
 
@@ -172,6 +200,11 @@ export default async function handler(req, res) {
       .select()
       .single();
     if (error) return res.status(500).json({ error: error.message });
+
+    // 同步把对应 watch_item 归档（雷达不再扫已关闭的投资）
+    try { await archiveInvestmentWatchItem(id); }
+    catch (e) { console.error("archiveInvestmentWatchItem failed:", e.message); }
+
     return res.json(data);
   }
 
