@@ -3,6 +3,7 @@
 // 触发方式：Vercel Cron（每天北京时间8:00）或手动 GET /api/cron/daily-report
 
 import { createClient } from '@supabase/supabase-js';
+import { searchKatao } from '../katao-search';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -34,18 +35,12 @@ function formatDate() {
   });
 }
 
-// ─── 卡淘价格查询 ───
+// ─── 卡淘价格查询：复用 searchKatao（在售），取最低价 ───
 async function fetchCardPrice(keyword) {
   try {
-    const res = await fetch(
-      `https://open.katao.com/api/SearchCommodity?keyword=${encodeURIComponent(keyword)}&pageSize=5`,
-      { headers: { Authorization: `Bearer ${process.env.KATAO_API_KEY}` } }
-    );
-    const data = await res.json();
-    const items = data?.data?.list || [];
-    if (!items.length) return null;
-    // 取最低价
-    const prices = items.map(i => parseFloat(i.price)).filter(p => !isNaN(p));
+    const items = await searchKatao(keyword, false);
+    if (!items?.length) return null;
+    const prices = items.map(i => Number(i.price)).filter(p => p > 0);
     return prices.length ? Math.min(...prices) : null;
   } catch {
     return null;
@@ -81,30 +76,26 @@ if (
     lines.push('## 🃏 卡价监控\n');
     const { data: watchItems, error } = await supabase
       .from('watch_items')
-      .select('*')
-      .eq('is_active', true);
+      .select('id, description, search_keywords_katao, tier')
+      .eq('status', 'active')
+      .limit(20);
 
     if (error || !watchItems?.length) {
       lines.push('_暂无盯梢目标_');
     } else {
-      let hitCount = 0;
       for (const item of watchItems) {
-        const lowestPrice = await fetchCardPrice(item.keyword || item.name);
+        const kw = (item.search_keywords_katao || '').trim();
+        const name = item.description || kw || '(未命名)';
+        if (!kw) { lines.push(`⚪ ${name} — 无搜索关键词`); continue; }
+        const lowestPrice = await fetchCardPrice(kw);
         if (lowestPrice === null) {
-          lines.push(`⚪ ${item.name} — 未查到报价`);
+          lines.push(`⚪ ${name} — 暂无在售`);
           continue;
         }
-        const targetPrice = parseFloat(item.target_price);
-        const hit = lowestPrice <= targetPrice;
-        if (hit) hitCount++;
-        const emoji = hit ? '✅' : '💤';
-        lines.push(
-          `${emoji} **${item.name}** 最低 ¥${lowestPrice.toFixed(0)}` +
-          (targetPrice ? `（目标 ¥${targetPrice.toFixed(0)}${hit ? ' 达标！' : ''}）` : '')
-        );
-      }
-      if (hitCount > 0) {
-        lines.unshift(`> 🎯 今日 **${hitCount}** 张卡达到目标价，记得去看看！\n`);
+        const emoji = item.tier === 'must_watch' ? '⭐' : '💤';
+        lines.push(`${emoji} **${name}** 卡淘最低 ¥${lowestPrice.toFixed(0)}`);
+        // 防限频
+        await new Promise(r => setTimeout(r, 400));
       }
     }
     lines.push('');
