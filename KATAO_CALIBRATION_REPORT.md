@@ -182,10 +182,12 @@ Harvest 完整日志:`/tmp/katao_calib/harvest.log`;汇总 JSON:`/tmp/katao_cali
 
 > 分支 `katao-keyword-calibration` **只在本地**,没 push 到 GitHub(避免 Vercel 起 preview 部署 — brief 说不部署)。
 
-1. ✅ **Review 本分支 2 个 commit**:
+1. ✅ **Review 本分支 4 个 commit**:
    ```
    git checkout katao-keyword-calibration
    git log --oneline main..HEAD
+   # 99fca6d fix: searchKatao 加 3 次指数退避——瞬时网络抖动不再误报失败
+   # b4b022d docs: 报告补 commit hash + 分支没 push 说明
    # 435ad73 chore: 校准/采集脚本 + 迁移 SQL + 晨报
    # a0a54f3 refactor: 抽 lib/katao-keywords.js 统一卡淘关键词生成 + 实证去年份默认
    git diff main..HEAD                # 完整 diff
@@ -211,8 +213,9 @@ Harvest 完整日志:`/tmp/katao_calib/harvest.log`;汇总 JSON:`/tmp/katao_cali
 ## 9. 反思 + 余力做的
 
 - 给 collection-goals.js PUT 加了"改名重建 kw"(同 investments PUT 的同类漏洞,见 commit 历史)
-- harvest/calibrate 都加了 3 次指数退避错误处理
-- 由于无 node,mjs 脚本未做本地烟雾测试 — 早上你可以 `node --check scripts/*.mjs` 简单语法检查
+- **production katao-search.js 也加了 3 次指数退避**(800ms/1.6s/3.2s)。原版单次 fetch,任何瞬时抖动就抛错给 radar-scan / daily-report。新逻辑只在三次都失败时才抛错。
+- calibrate/harvest 脚本都内置 3 次指数退避(≥1.6s 起步,符合 brief"sleep ≥1.5s"约束)
+- 由于本机无 node 运行时,mjs 脚本未做本地烟雾测试 — 早上你可以 `node --check scripts/*.mjs` 做简单语法检查。但脚本逻辑与本机跑通的 python 版严格等效,信心高。
 
 ---
 
